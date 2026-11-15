@@ -1,111 +1,66 @@
 # 내키면
 
-**계획 없어도, 마음 가는 곳으로.**
+**계획 없어도, 마음 가는 곳으로.** 현재 위치와 지금 하고 싶은 일에서 출발해 갈 곳과 해 볼 활동을 고르고, 확인한 목적지를 Pleos 내비로 전달하는 차량용 즉흥 외출 앱입니다.
 
-어디로 갈지 정하지 않은 순간, 지금 상황·기분·동행 조건에 맞춰 **갈 만한 장소와 도착해서 해볼 활동**을 제안하는 차량용 즉흥 외출·여행 앱입니다. 후보를 직접 살펴보거나 ‘하나만 바로 추천받기’로 조건에 맞는 장소 하나를 확인할 수 있습니다. 시간이 정해져 있어도, 아직 몰라도, 제한이 없어도 시작할 수 있습니다.
+`com.naekimyeon.pleos` · Kotlin · Jetpack Compose · Android Automotive / Pleos Connect
 
-`com.naekimyeon.pleos` · Kotlin · Jetpack Compose · Android Automotive / Pleos Connect 대상
+이 브랜치는 제출 후 개선하는 **0.3.0-preview**입니다. 제출 기준은 [`f722a0b`](https://github.com/dev-whseol/naekimyeon-pleos/tree/f722a0b8dd7d0e3d373289ccdc61fbb764a779c9)와 태그 `submission-2026-11-15`로 보존하며 기존 제출 APK는 변경하지 않습니다.
 
-**추천은 고정 예시를 이용하는 오프라인 시연이며, 내비게이션 인계는 실제 Pleos NaviHelper SDK를 사용합니다.** 0.2는 Pleos Connect 2.1.0의 실제 D 상태에서 한 곳 요약과 명시적 안내 확인 화면을 표시하고, 정차 상태에서 전체 비교를 제공합니다. 표시한 장소·시간·주차 정보는 실제 현장 상태를 보장하지 않습니다. [검증 기록](docs/TEST_PLAN.md)
+## 이번 개선
 
-시간은 `아직 정하지 않음`, `제한 없음`, `정해진 시간`을 구분합니다. 복귀 기준이 정해지지 않았으면 돌아올 수 있다고 계산하지 않으며, 주차 시설 예시가 있어도 빈자리 정보는 미확인으로 남깁니다. 실제 현재 위치를 읽지 않고 서울 일대의 예시 좌표를 사용합니다.
+- **실제 주변 찾기**: 명시적인 위치 사용 선택 후, 등록된 서울숲·월드컵공원·서울대공원 중 직선 반경 50 km 안의 장소를 찾습니다. 전국 실시간 검색은 아닙니다.
+- **샘플과 분리**: 위치 거절·지연·미지원 지역은 이유와 재시도를 제공합니다. `샘플 둘러보기`를 직접 골랐을 때만 기존 예시를 사용합니다.
+- **정보 근거 표시**: 실제 장소의 주소·출처·확인일·직선거리와 미확인 주차 정보를 구분합니다. 대표 좌표이므로 차량 진입로는 내비에서 확인해야 합니다.
+- **시간 조건 유지**: 미정·제한 없음·정해진 시간을 구별합니다. 이동 시간을 모르면 체류 시간과 왕복 가능 여부를 만들어 내지 않습니다.
+- **주행 흐름 유지**: 알려진 D에서는 한 곳 요약과 명시적 안내를 제공합니다. 권한 팝업·글자 입력·상세 비교는 정차 중에 사용합니다.
 
-## 시연 자료
-
-- [0.1 실제 Pleos 실행 시연 58초](demo/naekimyeon-demo.mp4)
-- [로컬에서 영상·화면 모아 보기](demo/index.html)
-- [이미지·영상 출처와 편집 범위](docs/ASSETS.md)
-
-영상은 0.1의 실제 에뮬레이터 녹화를 편집했습니다. 0.2의 주행용 화면은 검증 기록과 구분해 확인합니다. 화면의 장소와 시간은 샘플입니다. 화면 문구와 추천 제목은 Argon의 제품 카피 검토를 반영했습니다.
-
-![실제 Pleos 에뮬레이터 첫 화면](demo/screenshots/home.png)
-
-## 이렇게 둘러보세요
-
-1. 기분이나 하고 싶은 일을 120자 이내로 적거나 네 가지 예시 문구를 고릅니다. 입력은 선택이며, 지원하지 않는 표현은 가까운 항목을 직접 고르게 안내합니다.
-2. ‘추천 장소 보기’를 누르면 입력에 따라 순서·활동·추천 이유가 달라진 후보를 볼 수 있습니다. ‘머리 좀 비우고 싶어’에는 벤치에서 하늘 보기, ‘둘이 가볍게 다녀오고 싶어’에는 서로 마음에 드는 나무 소개하기처럼 할 일을 제안합니다.
-3. 고르기 어렵다면 ‘하나만 바로 추천받기’를 사용합니다. 시간·활동 조건을 통과한 장소 중 하나를 보여줍니다. ‘다른 곳 보기’로 다른 후보를 확인할 수 있으며 자동으로 출발하지 않습니다.
-4. 정차 중에는 ‘자세히 보기’로 비교하고, 알려진 주행 상태에서는 한 곳 요약을 확인합니다. 목적지를 명시적으로 승인해야 실제 Pleos 내비로 전달됩니다. 주행 중 키보드·사진·긴 목록은 표시하지 않으며 상태를 알 수 없으면 내비 변경을 막습니다.
-
-마음 해석은 준비된 키워드를 연결하는 로컬 규칙입니다. 입력 원문은 저장·로그·콜백 응답에 넣지 않습니다. 감성 키워드 자체의 독창성이나 재방문 효과를 입증했다고 주장하지 않습니다. [제품 가치와 비교 시험](docs/PRODUCT.md), [아고라 검토 결과](docs/AGORA_DECISION.md)
+현재 위치와 마음 원문은 메모리에서만 사용합니다. 백그라운드 위치 권한, 이동 이력 저장, 계정, 광고·분석 SDK, 서버 API 키는 없습니다. [데이터 출처와 제한](docs/DATA_SOURCES.md), [보안](docs/SECURITY.md)
 
 ## 실행 방법
 
-준비된 release APK를 바로 시험하려면 Pleos Connect Emulator 2.1.0을 부팅하고 다음 명령을 사용합니다. 추가 API 키나 로그인은 필요하지 않습니다.
-
-```powershell
-adb install -r "apk/설우현_내키면_release.apk"
-adb shell am start -n com.naekimyeon.pleos/.MainActivity
-```
-
-이미 다른 서명의 개발 APK를 설치한 경우 별도 테스트 AVD를 사용합니다. 소스에서 직접 빌드하는 방법은 다음과 같으며, release 서명은 [별도 빌드 안내](docs/BUILD_RELEASE.md)를 따릅니다.
-
-1. 이 저장소를 Android Studio에서 엽니다.
-2. JDK 21과 Android SDK Platform 36을 준비하고 Gradle 동기화를 실행합니다. 최초 의존성 다운로드에는 인터넷이 필요합니다.
-3. Android Studio의 SDK 위치 또는 로컬 `local.properties`에 `sdk.dir`을 설정합니다. 개인 PC 경로가 들어 있는 이 파일은 저장소에 올리지 않습니다.
-4. Windows에서 프로젝트 루트의 명령을 실행합니다.
+Android Studio에서 열고 JDK 21·Android SDK Platform 36을 준비합니다. SDK 경로는 로컬 `local.properties`의 `sdk.dir` 또는 Android Studio 설정으로 지정합니다. 최초 의존성 다운로드에는 인터넷이 필요합니다.
 
 ```powershell
 .\gradlew.bat :app:assembleDebug
-.\gradlew.bat :app:testDebugUnitTest :app:lintDebug
+.\gradlew.bat :app:testReleaseUnitTest :app:lintDebug
+adb -s <에뮬레이터-serial> install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s <에뮬레이터-serial> shell am start -n com.naekimyeon.pleos/.MainActivity
 ```
 
-5. 에뮬레이터를 완전히 부팅한 뒤 Android Studio에서 `app`을 실행하거나 빌드한 APK를 설치합니다.
-
-```powershell
-adb devices
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.naekimyeon.pleos/.MainActivity
-```
-
-여러 장치가 연결되어 있으면 모든 `adb` 명령에 `-s <실제 장치 serial>`을 지정합니다. 디버그 APK 설치는 개발용입니다. 제출용 release APK의 파일과 검증 결과는 아래 항목을 따릅니다.
+기존 앱과 서명이 다르면 별도 테스트 AVD를 사용합니다. 모든 기기 명령에는 실제 테스트 에뮬레이터의 serial을 지정합니다. release 서명은 [빌드 안내](docs/BUILD_RELEASE.md)를 따릅니다. 서명 키와 비밀번호는 저장소에 포함하지 않습니다.
 
 ## 테스트 환경과 필요한 설정
 
-| 항목 | 실제 확인 결과 |
+| 항목 | 기준 |
 | --- | --- |
-| 앱 버전 | `0.2.0-demo` (`versionCode 2`) |
-| 빌드 도구 | JDK 21 / Gradle 8.13 / Android Gradle Plugin 8.13.1 / Kotlin 2.2.21 · release 빌드 성공 |
-| compileSdk / targetSdk / minSdk | 36 / 34 / 28 · JVM target 17 |
-| **사용한 Pleos Connect 에뮬레이터 버전** | **공식 system image 2.1.0 · Android 14 / API 34 · x86_64** |
-| **사용한 화면 규격** | **전체 디스플레이 2560 × 1440 px, 160 dpi**. 실제 앱 창 1682 × 1210 px; 방향 변경 시험의 좁은 창 1198 × 1210 px |
-| Android Emulator / 호스트 가속 | 37.2.13 / Windows Hypervisor Platform / host GPU (NVIDIA GeForce GTX 1660 Ti) |
-| Pleos 실행·설치 | 서명된 release APK 설치, 후보·상세·시간 계산, 내비 인계, D/P 제한 전환 확인 |
-| 자동 테스트 | **70개 통과**: release JVM 38개 + 기기 32개. 기기 시험은 기존 31개와 주행 패널 1개를 나누어 실행 |
-| Android lint | `lintDebug` 성공, 오류 0 / 경고 11 |
-| 실제 차량 | 미검증 |
-| 외부 API 키 / 계정 | 추천 시연에 불필요. 로그인·분석 SDK·영속적인 이동 이력 없음 |
-| 실제 위치 | 런타임 위치 권한 요청 없음. 서울 일대 고정 예시 |
-| 차량 상태 | 실제 D에서 한 곳 요약·확인 버튼 표시 및 주행 패널 시험 통과. P에서 전체 화면, 상태 미확인 시 제한 유지 |
-| 내비 인계 | NaviHelper `3.0.5`의 실제 경로 적용과 앱의 `CONFIRMED` 상태 확인. 서울 일대 샘플 좌표 사용 |
-| Gleo | Android Intent·JSON·콜백 payload 테스트 27개 통과. **공식 스키마 승인·실제 음성 호출은 미검증** |
+| Pleos Connect 에뮬레이터 | 공식 system image **2.1.0**, Android 14 / API 34, x86_64 |
+| 화면 규격 | 전체 **2560 × 1440 px**, 160 dpi. 작은 앱 창·주행 화면 별도 시험 |
+| 빌드 | JDK 21 / Gradle 8.13 / AGP 8.13.1 / Kotlin 2.2.21 |
+| SDK | compile 36 / target 34 / min 28, JVM target 17 |
+| 내비 | NaviHelper **3.0.5**, 사용자 확인 후 경로 요청·확인·실패 구분 |
+| 위치 | Android 전경 위치. 대략적 위치·신선도·오차·취소·권한 거절 처리 |
+| 외부 API 키 | 현재 버전에 불필요. 검토한 장소 자료를 앱에 포함 |
+| Gleo | Intent·입력 검증·콜백 구현. 공식 승인·실제 음성 서비스 호출은 미검증 |
+| 실차 / App Market | 미검증 / 미승인 |
 
-일반 Android 에뮬레이터에서 실행되더라도 이를 Pleos Connect 검증으로 기록하지 않습니다. 차량 안전 상태를 읽지 못하면 상세 조작을 제한하므로 일반 Android 장치는 전체 차량 시연 환경을 대신하지 않습니다. Pleos SDK 문서의 예시 버전이나 권장 디스플레이 값을 실제 사용값으로 대신 적지 않습니다. [Pleos 공식 설치 안내](https://document.pleos.ai/docs/pleos-only/getting-started)를 참고해 환경을 준비할 수 있습니다.
+[0.3 검증 기록](docs/UPGRADE_TESTS.md)에 새 빌드 결과를 기록합니다. 0.2의 통과 수를 새 버전의 결과로 재사용하지 않습니다. Android 위치 제공자의 동작을 실차 Pleos FusedLocation SDK 지원 보장으로 해석하지 않습니다.
 
-창 크기 시험은 Pleos에서 Android의 화면 방향 변경을 요청한 결과이며, 두 개의 네이티브 앱 창을 나란히 배치한 전체 시험은 아닙니다. 테스트 수는 자동 시험 건수이며 사용자 조사 인원이나 실차 검증 건수가 아닙니다.
+이번 버전에서 **JVM 60개와 Pleos 기기 45개** 시험이 통과했습니다. release 빌드와 lintDebug도 통과했습니다. 에뮬레이터의 주입 위치 시험이며 실차 GPS 정확도 검증은 아닙니다.
 
-## APK
+## APK와 시연
 
-서명된 release APK: [`apk/설우현_내키면_release.apk`](apk/설우현_내키면_release.apk) · **22,338,931 bytes(약 21.3 MiB)**. Pleos 에뮬레이터에서 설치·실행했습니다. 서명 키와 비밀번호는 저장소에 포함하지 않습니다.
+- 새 개발 APK: [`apk/preview/naekimyeon-0.3.0-preview-release.apk`](apk/preview/naekimyeon-0.3.0-preview-release.apk), **0.3.0-preview**, 22,453,683 bytes
+- 개발 APK SHA-256: `6ddadc21dd2248d7827cc7079947fbaef79aeb6cf2d069baf5b3edc7e1e57c64`
+- 제출 APK: [`apk/설우현_내키면_release.apk`](apk/설우현_내키면_release.apk), **0.2.0-demo**
+- 제출 APK SHA-256: `3d96e44af2b297713e7cd15a1c42a038c9c206c9819ffca147e3423e231935a6`
+- 제출 당시 [정차 영상](demo/naekimyeon-demo.mp4), [주행 영상](demo/naekimyeon-driving.mp4)
 
-SHA-256: `3d96e44af2b297713e7cd15a1c42a038c9c206c9819ffca147e3423e231935a6`
+위 영상은 제출 당시 샘플 흐름이며 새 위치 기능의 시연이 아닙니다. [제출 기준 기록](docs/SUBMISSION_2026_11_15.md)
 
-## 구조와 검증 문서
+0.3: [실제 장소 추천 화면](demo/screenshots/preview-0.3/nearby-results.png) · [D 상태 125초 유지 확인](demo/screenshots/preview-0.3/driving-after-125s.png) · [D 화면 기록 15초](demo/naekimyeon-0.3-driving-state.mp4). 에뮬레이터 시험 위치이며 영상은 주행 화면 유지 기록입니다.
 
-- [제품 경험·가치 가설·비교 시험](docs/PRODUCT.md)
-- [아고라의 모델별 입장·반론·이번 범위](docs/AGORA_DECISION.md)
-- [사용자 원안과 회의 컨텍스트 복구](docs/AGORA_CONTEXT.md)
-- [아키텍처와 연동 범위](docs/ARCHITECTURE.md)
-- [Pleos SDK·Gleo 계약 및 검증 범위](docs/PLEOS_INTEGRATION.md)
-- [보안·개인정보·공개 범위](docs/SECURITY.md)
-- [테스트 계획과 실행 결과](docs/TEST_PLAN.md)
-- [제출 체크리스트](docs/RELEASE_CHECKLIST.md)
+## 설계와 다음 작업
 
-## 공모전 제출 기준
+[제품 원안](docs/PRODUCT.md) · [개선 아고라 검토](docs/IMPROVEMENT_REVIEW.md) · [개발 순서](docs/ROADMAP.md) · [구조](docs/ARCHITECTURE.md) · [Pleos 연동](docs/PLEOS_INTEGRATION.md) · [데이터](docs/DATA_SOURCES.md) · [자산 출처](docs/ASSETS.md)
 
-공식 안내 기준으로 저장소 주소와 최종 커밋 해시를 제출하고, APK는 `apk/` 또는 GitHub Release에 둡니다. 개발 산출물 가산점을 위한 저장소 공개 기간은 **2026-11-16까지 공개 전환, 2026-11-23까지 공개 유지**입니다. 공개가 어려우면 **소스 코드와 APK를 묶은 ZIP의 다운로드 링크를 접수 마감 전에 제출**하는 대안이 안내되어 있습니다. API 키를 공개하거나 자체 서버 소스를 제출할 필요는 없습니다. [제출 방법](https://appdevchallenge.auto-hmg.io/guide/submission), [추가 공지](https://appdevchallenge.auto-hmg.io/notice/c0a1a000-2026-4923-8000-000000000007)
-
-저장소의 공개 상태는 오픈소스 라이선스 부여와 별개입니다. 별도 라이선스를 명시하지 않은 자체 코드에 MIT 등의 재사용 허가가 자동으로 생기지 않습니다. GitHub 공개 저장소의 열람·포크는 GitHub 이용약관의 적용을 받으며, 공개 후 만들어진 사본은 비공개 전환으로 회수되지 않습니다. 의존 라이브러리에는 각각의 라이선스가 적용됩니다. [GitHub 라이선스 안내](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)
-
-주행용 화면 검증 영상: [0.2 주행 화면](demo/naekimyeon-driving.mp4). 기존 일반 시연은 정차 화면 흐름입니다.
-
+개인 신청서·연락처·서명·비밀키·내부 회의 원문은 공개 저장소에 포함하지 않습니다. 장소 범위 확장, 실제 차량 진입점·이동 시간·영업·주차·실내 후보는 후속 구현이 필요합니다.

@@ -269,6 +269,26 @@ class GleoBridgeInstrumentedTest {
         assertFalse(response.has("data"))
     }
 
+    @Test fun nearbyCallbackDistinguishesCuratedEmulatorDataWithoutSendingOriginOrFeeling() {
+        val context = RecordingContext()
+        val phrase = "오늘은 조용한 곳에서 쉬고 싶어"
+        assertTrue(GleoBridge.respondNearbyCandidate(context, GleoBreakRequest(null, feeling = phrase),
+            "서울숲", mockOrigin = false, approximateOrigin = true, emulatedOrigin = true))
+        val raw = context.broadcast!!.getStringExtra("response")!!
+        assertFalse(raw.contains(phrase))
+        val response = JSONObject(raw)
+        val item = JSONArray(response.getString("data")).getJSONObject(0)
+        assertEquals("curated_catalog", item.getString("dataSource"))
+        assertEquals("emulator", item.getString("locationSource"))
+        assertFalse(item.getBoolean("mockLocationFlag"))
+        assertTrue(item.getBoolean("approximateOrigin"))
+        assertFalse(item.getBoolean("navigationStarted"))
+        assertFalse(item.has("latitude"))
+        assertFalse(item.has("longitude"))
+        assertFalse(item.has("accuracyMeters"))
+        assertFalse(item.has("feeling"))
+    }
+
     private class RecordingContext : ContextWrapper(InstrumentationRegistry.getInstrumentation().targetContext) {
         var broadcast: Intent? = null
         var reject = false

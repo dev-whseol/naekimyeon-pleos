@@ -29,12 +29,12 @@ class DriverPanelInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val device = UiDevice.getInstance(instrumentation)
         val packageName = instrumentation.targetContext.packageName
-        val restricted = mutableStateOf(true)
+        val restricted = mutableStateOf(false)
         val available = mutableStateOf(true)
         val navigationCount = AtomicInteger(0)
         val destination = AtomicReference<Place?>(null)
         val appliedCandidate = AtomicReference<Place?>(null)
-        val incoming = IncomingRequest(id = 9001, feeling = MoodIntent.RESET.phrase)
+        val incoming = mutableStateOf<IncomingRequest?>(null)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
@@ -44,10 +44,16 @@ class DriverPanelInstrumentedTest {
                         restricted = restricted.value,
                         drivingAvailable = available.value,
                         restrictionMessage = "차량 상태를 확인할 수 없어요",
-                        incomingRequest = incoming,
+                        incomingRequest = incoming.value,
                         onDrivingCandidateApplied = { id, place -> if (id == 9001L) appliedCandidate.set(place) },
                     )
                 }
+            }
+            checkNotNull(device.wait(Until.findObject(By.pkg(packageName).text("샘플 둘러보기")), 5_000)).click()
+            instrumentation.waitForIdleSync()
+            scenario.onActivity {
+                restricted.value = true
+                incoming.value = IncomingRequest(id = 9001, feeling = MoodIntent.RESET.phrase)
             }
             assertNotNull(device.wait(Until.findObject(By.pkg(packageName).text("강변 산책길 안내")), 5_000))
             assertTrue(device.hasObject(By.pkg(packageName).text("지금 가볼 만한 곳")))

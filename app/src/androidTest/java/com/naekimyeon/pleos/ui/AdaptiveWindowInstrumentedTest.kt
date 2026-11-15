@@ -45,6 +45,7 @@ class AdaptiveWindowInstrumentedTest {
         try {
             scenario.onActivity { originalOrientation = it.requestedOrientation }
             requireVisible("어디 가지?", 5_000)
+            tap("샘플 둘러보기")
             tap("이동 조건 더하기")
             tap("바람 쐬기")
             tap("45분")

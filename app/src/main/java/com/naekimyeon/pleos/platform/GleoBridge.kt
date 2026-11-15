@@ -125,6 +125,30 @@ object GleoBridge {
         )
     }
 
+    /** Public catalog title only. No origin coordinates, accuracy value, or raw feeling are sent. */
+    fun respondNearbyCandidate(context: Context, request: GleoBreakRequest, candidateTitle: String,
+        mockOrigin: Boolean, approximateOrigin: Boolean, emulatedOrigin: Boolean = false): Boolean {
+        val title = candidateTitle.trim().take(80)
+        if (title.isBlank()) return respond(context, GleoResponseStatus.FAIL, "A nearby destination could not be selected.")
+        val data = JSONArray().put(JSONObject().apply {
+            put("candidateTitle", title)
+            put("dataSource", "curated_catalog")
+            put("locationSource", if (emulatedOrigin) "emulator" else if (mockOrigin) "mock" else "device")
+            put("mockLocationFlag", mockOrigin)
+            put("approximateOrigin", approximateOrigin)
+            put("proximityBasis", "straight_line")
+            put("hasFeeling", request.feeling != null)
+            put("navigationStarted", false)
+            put("confirmationRequired", true)
+            put("liveTrafficConnected", false)
+            put("liveParkingAvailabilityConnected", false)
+        })
+        return respond(context, GleoResponseStatus.SUCCESS,
+            if (emulatedOrigin) "A curated place was selected using an emulator location, not a real vehicle location. Navigation still requires explicit confirmation."
+            else if (mockOrigin) "A curated place was selected using a mock location. Navigation still requires explicit confirmation."
+            else "A nearby place from the curated catalog is ready. Road travel time and parking availability are not verified.", data)
+    }
+
     /** A true return means broadcast submission only; the Gleo app does not acknowledge delivery. */
     fun respond(
         context: Context,

@@ -21,7 +21,10 @@ data class IncomingRequest(
     val unlimited: Boolean = false, val feeling: String? = null,
 )
 
-data class DataProvenance(val label: String, val isSample: Boolean)
+data class DataProvenance(
+    val label: String, val isSample: Boolean,
+    val sourceUrl: String? = null, val checkedOn: String? = null,
+)
 
 data class ParkingInfo(
     val facility: FacilityState,
@@ -47,11 +50,17 @@ data class Place(
     val parking: ParkingInfo,
     val image: PlaceImage,
     val provenance: DataProvenance,
+    val address: String = "",
+    val straightLineDistanceMeters: Double? = null,
+    val visitNote: String = "",
+    /** Editorial preference, not measured popularity or a claim about visitors' feelings. */
+    val moodPreference: Map<MoodIntent, Int> = emptyMap(),
 ) {
     init {
         require(latitude in -90.0..90.0 && longitude in -180.0..180.0)
         require(listOfNotNull(outboundMinutes, returnMinutes, accessMinutes).all { it >= 0 })
         require(minimumStayMinutes >= 0)
+        require(straightLineDistanceMeters == null || (straightLineDistanceMeters.isFinite() && straightLineDistanceMeters >= 0))
     }
 }
 
@@ -64,7 +73,7 @@ data class RecommendationRequest(
     init { require(safetyMinutes >= 0) }
 }
 
-enum class BudgetStatus { NOT_SET, NO_DEADLINE, RETURN_PLAN_NEEDED, ESTIMATED }
+enum class BudgetStatus { NOT_SET, NO_DEADLINE, RETURN_PLAN_NEEDED, ESTIMATED, TRAVEL_ESTIMATE_NEEDED }
 
 data class Recommendation(
     val place: Place,

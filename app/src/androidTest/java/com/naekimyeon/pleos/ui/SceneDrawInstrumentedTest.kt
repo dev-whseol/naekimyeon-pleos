@@ -26,6 +26,7 @@ class SceneDrawInstrumentedTest {
     fun drawUsesOnlyEligibleSceneAndRequiresExplicitDetailChoice() {
         ActivityScenario.launch(MainActivity::class.java).use {
             visible("어디 가지?", 5_000)
+            tap("샘플 둘러보기")
             tap("머리 좀 비우고 싶어")
             tap("이동 조건 더하기")
             tap("바람 쐬기")

@@ -27,15 +27,21 @@ class SceneRecommender(private val engine: RecommendationEngine = Recommendation
             (engine.recommend(listOf(place), request) as? RecommendationResult.Ready)?.recommendations?.singleOrNull()
         }
         val order = when (mood) {
-            MoodIntent.RESET -> listOf("riverside", "forest_rest", "window_cafe")
-            MoodIntent.TOGETHER -> listOf("forest_rest", "window_cafe", "riverside")
-            MoodIntent.DISCOVERY -> listOf("forest_rest", "riverside", "window_cafe")
-            MoodIntent.REST -> listOf("window_cafe", "riverside", "forest_rest")
+            MoodIntent.RESET -> listOf(PlaceImage.RIVERSIDE, PlaceImage.GARDEN, PlaceImage.CAFE)
+            MoodIntent.TOGETHER -> listOf(PlaceImage.GARDEN, PlaceImage.CAFE, PlaceImage.RIVERSIDE)
+            MoodIntent.DISCOVERY -> listOf(PlaceImage.GARDEN, PlaceImage.RIVERSIDE, PlaceImage.CAFE)
+            MoodIntent.REST -> listOf(PlaceImage.CAFE, PlaceImage.RIVERSIDE, PlaceImage.GARDEN)
             null -> emptyList()
         }
+        // Nearby distance bands prevent a mood match from pushing a distant venue ahead
+        // of an otherwise suitable local option. Within 5 km bands, explicit mood matters.
         val ranked = eligible.sortedWith(compareBy<Recommendation> {
-            order.indexOf(it.place.id).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE
-        }.thenBy { it.place.outboundMinutes ?: Int.MAX_VALUE }.thenBy { it.place.id })
+            it.place.straightLineDistanceMeters?.let { meters -> (meters / 5_000).toInt() } ?: 0
+        }.thenBy {
+            if (mood == null) 0 else it.place.moodPreference[mood]
+                ?: order.indexOf(it.place.image).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE
+        }.thenBy { it.place.straightLineDistanceMeters ?: Double.MAX_VALUE }
+            .thenBy { it.place.outboundMinutes ?: Int.MAX_VALUE }.thenBy { it.place.id })
         val offset = if (ranked.isEmpty()) 0 else variation.coerceAtLeast(0) % ranked.size
         val rotated = ranked.drop(offset) + ranked.take(offset)
         return SceneResult.Ready(rotated.take(3).map { scene(it, mood) })

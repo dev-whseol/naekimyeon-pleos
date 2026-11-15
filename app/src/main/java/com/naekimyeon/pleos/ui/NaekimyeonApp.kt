@@ -38,9 +38,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naekimyeon.pleos.R
 import com.naekimyeon.pleos.domain.*
+import com.naekimyeon.pleos.platform.LocationState
 import kotlinx.coroutines.delay
 
-/** Native Compose UI; all displayed place/travel data is deliberately an offline demo fixture. */
+/** Nearby catalog and explicitly selected sample browsing share the same mood and safety flow. */
 @Composable
 fun NaekimyeonApp(
     navigationStatus: String,
@@ -55,10 +56,18 @@ fun NaekimyeonApp(
     drivingMaxStringLength: Int = 120,
     drivingMaxCandidates: Int = 3,
     navigationPlaceId: String? = null,
+    locationState: LocationState = LocationState(),
+    onRequestLocation: () -> Unit = {},
+    onIncomingNearbyUnavailable: (Long) -> Unit = {},
+    onIncomingNearbyApplied: (Long, Place?) -> Unit = { _, _ -> },
+    onSourceChanged: (Boolean) -> Unit = {},
+    useLocationOnLaunch: Boolean = false,
+    onUseLocationOnLaunchChanged: (Boolean) -> Unit = {},
 ) {
     NaekimyeonTheme {
         val keyboard = LocalSoftwareKeyboardController.current
         var screen by rememberSaveable { mutableStateOf("home") }
+        var sampleMode by rememberSaveable { mutableStateOf(false) }
         var needName by rememberSaveable { mutableStateOf("") }
         var timeCode by rememberSaveable { mutableStateOf("unspecified") }
         var sameOrigin by rememberSaveable { mutableStateOf(false) }
@@ -75,6 +84,8 @@ fun NaekimyeonApp(
         var conditionsExpanded by rememberSaveable { mutableStateOf(false) }
         var variation by rememberSaveable { mutableIntStateOf(0) }
         var showDraw by remember { mutableStateOf(false) }
+        var navigationDialogContext by remember { mutableStateOf<List<Any?>?>(null) }
+        var drawDialogContext by remember { mutableStateOf<List<Any?>?>(null) }
         var drawnPlaceId by rememberSaveable { mutableStateOf("") }
         var pendingDriverIncomingId by remember { mutableStateOf<Long?>(null) }
         var pendingDriverPlaceId by remember { mutableStateOf<String?>(null) }
@@ -96,15 +107,33 @@ fun NaekimyeonApp(
             time = time,
             returnPlan = if (sameOrigin) ReturnPlan.SAME_ORIGIN else ReturnPlan.UNSPECIFIED,
         )
-        val result = remember(needName, timeCode, sameOrigin, moodName, variation) {
-            SceneRecommender().recommend(DemoPlaces.places, request, mood, variation)
+        val nearbyPlaces = remember(locationState) {
+            if (locationState.isUsable) locationState.fix?.let { NearbyPlaces.find(it.point) }.orEmpty() else emptyList()
         }
-        val selected = DemoPlaces.places.firstOrNull { it.id == selectedId }
+        val activePlaces = if (sampleMode) DemoPlaces.places else nearbyPlaces
+        val nearbyUnavailable = !sampleMode && (!locationState.isUsable || nearbyPlaces.isEmpty())
+        val locationNotice = when {
+            locationState.fix?.isEmulator == true -> "에뮬레이터 위치 · 실차 위치 아님"
+            locationState.fix?.isMock == true -> "테스트 위치"
+            else -> null
+        }
+        val result = remember(activePlaces, needName, timeCode, sameOrigin, moodName, variation) {
+            SceneRecommender().recommend(activePlaces, request, mood, variation)
+        }
+        val selected = activePlaces.firstOrNull { it.id == selectedId }
         val selectedScene = (result as? SceneResult.Ready)?.scenes?.firstOrNull { it.place.id == selectedId }
         val eligibleScenes = (result as? SceneResult.Ready)?.scenes.orEmpty()
         val drawnScene = eligibleScenes.firstOrNull { it.place.id == drawnPlaceId }
         val driverScenes = eligibleScenes.take(drivingMaxCandidates.coerceIn(0, 3))
         val driverScene = driverScenes.firstOrNull { it.place.id == selectedId } ?: driverScenes.firstOrNull()
+        val locationSelectionBasis = if (sampleMode) null else listOf(locationState.isUsable, locationState.precision, locationState.fix)
+        val interactionContext = listOf(sampleMode, locationSelectionBasis, activePlaces,
+            needName, timeCode, sameOrigin, moodName, variation, selectedId)
+        val latestInteractionContext by rememberUpdatedState(interactionContext)
+        LaunchedEffect(interactionContext) {
+            if (navigationDialogContext != interactionContext) showNavigationConfirmation = false
+            if (drawDialogContext != interactionContext) showDraw = false
+        }
         val unappliedIncomingForFrame = incomingRequest != null && incomingRequest.id != lastIncomingId
         val pendingDriverIdForFrame = pendingDriverIncomingId
         val pendingDriverPlaceForFrame = pendingDriverPlaceId
@@ -135,9 +164,10 @@ fun NaekimyeonApp(
                     needs = incoming.need?.let { setOf(it) } ?: emptySet(),
                     time = incomingTime, returnPlan = ReturnPlan.UNSPECIFIED,
                 )
+                val incomingCandidates = (SceneRecommender().recommend(activePlaces, incomingConditions, incomingMood) as? SceneResult.Ready)?.scenes.orEmpty()
                 val incomingDriverCandidate = if (restricted && drivingAvailable) {
-                    (SceneRecommender().recommend(DemoPlaces.places, incomingConditions, incomingMood) as? SceneResult.Ready)
-                        ?.scenes?.take(drivingMaxCandidates.coerceIn(0, 3))?.firstOrNull()
+                    incomingCandidates
+                        .take(drivingMaxCandidates.coerceIn(0, 3)).firstOrNull()
                 } else null
                 needName = incoming.need?.name.orEmpty()
                 conditionsExpanded = incoming.need != null
@@ -158,15 +188,17 @@ fun NaekimyeonApp(
                 drawnPlaceId = ""
                 selectedId = incomingDriverCandidate?.place?.id.orEmpty()
                 feedback = ""
-                screen = if (unknownFeeling) "home" else if (incomingDriverCandidate != null) "detail" else "results"
+                screen = if (unknownFeeling || nearbyUnavailable) "home" else if (incomingDriverCandidate != null) "detail" else "results"
                 lastIncomingId = incoming.id
                 when {
                     unknownFeeling -> onIncomingFeelingUnmatched(incoming.id)
+                    nearbyUnavailable -> onIncomingNearbyUnavailable(incoming.id)
                     restricted && drivingAvailable -> {
                         pendingDriverPlaceId = incomingDriverCandidate?.place?.id
                         pendingDriverIncomingId = incoming.id
                     }
-                    else -> onIncomingRequestApplied(incoming.id)
+                    sampleMode -> onIncomingRequestApplied(incoming.id)
+                    else -> onIncomingNearbyApplied(incoming.id, incomingCandidates.firstOrNull()?.place)
                 }
             }
         }
@@ -188,7 +220,15 @@ fun NaekimyeonApp(
             }
             withFrameNanos { }
             pendingDriverIncomingId = null
-            if (restricted) onDrivingCandidateApplied(id, driverScene?.place) else onIncomingRequestApplied(id)
+            if (restricted) onDrivingCandidateApplied(id, driverScene?.place)
+            else if (sampleMode) onIncomingRequestApplied(id)
+            else onIncomingNearbyApplied(id, driverScene?.place)
+        }
+        fun chooseSource(sample: Boolean) {
+            sampleMode = sample; screen = "home"; selectedId = ""; drawnPlaceId = ""
+            showDraw = false; showInfo = false; showNavigationConfirmation = false
+            navigationRequested = false; pendingDriverIncomingId = null; keyboard?.hide()
+            onSourceChanged(sample)
         }
         fun reset() {
             screen = "home"; needName = ""; timeCode = "unspecified"; sameOrigin = false
@@ -200,6 +240,7 @@ fun NaekimyeonApp(
         fun drawScene() {
             ScenePicker.pick(eligibleScenes, drawnPlaceId, kotlin.random.Random.nextInt())?.let {
                 drawnPlaceId = it.place.id
+                drawDialogContext = interactionContext
                 showDraw = true
             }
         }
@@ -208,7 +249,7 @@ fun NaekimyeonApp(
             val interpretation = MoodInterpreter().interpret(feeling)
             if (interpretation == MoodInterpretation.Unknown) {
                 unknownFeeling = true
-            } else {
+            } else if (!nearbyUnavailable) {
                 if (interpretation is MoodInterpretation.Matched) moodName = interpretation.mood.name
                 unknownFeeling = false
                 screen = "results"
@@ -223,10 +264,16 @@ fun NaekimyeonApp(
             BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 val compact = maxWidth < 720.dp
                 val wide = maxWidth >= 960.dp && maxHeight >= 460.dp
-                if (restricted && drivingAvailable && drivingMaxCandidates > 0) {
+                if (restricted && drivingAvailable && nearbyUnavailable) {
+                    RestrictedPanel(if (locationState.isUsable) "50km 안에 등록된 공원이 없으니 정차 후 확인해 주세요."
+                        else locationState.drivingLocationMessage())
+                } else if (restricted && drivingAvailable && !sampleMode && driverScene == null) {
+                    RestrictedPanel("조건에 맞는 공원이 없으니 정차 후 다시 골라 주세요.")
+                } else if (restricted && drivingAvailable && drivingMaxCandidates > 0) {
                     DriverPanel(
                         scene = driverScene, canShowAnother = driverScenes.size > 1 && !nextCoolingDown,
                         maxStringLength = drivingMaxStringLength,
+                        locationNotice = if (sampleMode) null else locationNotice,
                         status = if (navigationRequested && navigationPlaceId != null && navigationPlaceId == driverScene?.place?.id) navigationStatus
                             else if (unknownFeeling) "마음은 정차 후 다시 골라 주세요." else "",
                         onNext = {
@@ -246,15 +293,21 @@ fun NaekimyeonApp(
                     )
                 } else if (restricted) RestrictedPanel(restrictionMessage) else Column(Modifier.fillMaxSize()) {
                     AppHeader(
-                        screen = screen, compact = compact,
+                        screen = screen, compact = compact, sampleMode = sampleMode,
                         onBack = { back() }, onReset = { reset() }, onInfo = { showInfo = true },
                     )
                     HorizontalDivider(color = Ink.Line.copy(alpha = .5f))
+                    if (!sampleMode && locationNotice != null) {
+                        Text(locationNotice, Modifier.padding(horizontal = 28.dp, vertical = 6.dp), color = Ink.Apricot, style = MaterialTheme.typography.bodySmall)
+                    }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when {
                             screen == "home" -> HomeScreen(
                                 wide = wide, compact = compact, need = need, timeCode = timeCode, sameOrigin = sameOrigin,
                                 feeling = feeling, mood = mood, unknownFeeling = unknownFeeling,
+                                sampleMode = sampleMode, locationState = locationState, nearbyCount = nearbyPlaces.size,
+                                onChooseSource = { chooseSource(it) }, onRequestLocation = onRequestLocation,
+                                useLocationOnLaunch = useLocationOnLaunch, onUseLocationOnLaunchChanged = onUseLocationOnLaunchChanged,
                                 conditionsExpanded = conditionsExpanded, onToggleConditions = { conditionsExpanded = !conditionsExpanded },
                                 onFeeling = { feeling = it.take(MoodInterpreter.MAX_INPUT_LENGTH); moodName = ""; unknownFeeling = false; variation = 0 },
                                 onMood = { feeling = it.phrase; moodName = it.name; unknownFeeling = false; variation = 0; keyboard?.hide() },
@@ -262,8 +315,12 @@ fun NaekimyeonApp(
                                 onTime = { timeCode = it }, onSameOrigin = { sameOrigin = it },
                                 onExplore = { explore() },
                             )
+                            nearbyUnavailable -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp)) {
+                                DiscoverySourcePanel(false, locationState, nearbyPlaces.size, { chooseSource(it) }, onRequestLocation,
+                                    useLocationOnLaunch, onUseLocationOnLaunchChanged)
+                            }
                             screen == "results" -> ResultsScreen(
-                                result = result, request = request, compact = compact,
+                                result = result, request = request, compact = compact, sampleMode = sampleMode,
                                 feeling = feeling.ifBlank { mood?.phrase.orEmpty() }, mood = mood,
                                 onDraw = { drawScene() },
                                 onVariation = {
@@ -277,8 +334,13 @@ fun NaekimyeonApp(
                             screen == "detail" && selected != null -> DetailScreen(
                                 place = selected, scene = selectedScene, request = request, wide = wide,
                                 navigationStatus = if (navigationRequested) navigationStatus else "",
-                                onNavigate = { showNavigationConfirmation = true },
+                                onNavigate = { navigationDialogContext = interactionContext; showNavigationConfirmation = true },
                                 onFeedback = { screen = "feedback" },
+                            )
+                            screen == "detail" && !sampleMode && selected == null -> EmptyPanel(
+                                "선택한 공원이 검색 범위를 벗어났어요",
+                                "현재 위치에서 직선 50km 안에 있는 등록 공원을 다시 살펴보세요.",
+                                "주변 공원 다시 보기", { screen = "results" },
                             )
                             screen == "feedback" && selected != null -> FeedbackScreen(
                                 place = selected, feedback = feedback, onFeedback = { feedback = it }, onDone = { reset() },
@@ -290,13 +352,15 @@ fun NaekimyeonApp(
             }
         }
 
-        if (showDraw && drawnScene != null && !restricted) {
+        if (showDraw && drawnScene != null && !restricted && drawDialogContext == interactionContext) {
             SceneDrawDialog(
                 scene = drawnScene, request = request, eligibleCount = eligibleScenes.size,
                 onDismiss = { showDraw = false }, onReroll = { drawScene() },
                 onExplore = {
-                    showDraw = false; selectedId = drawnScene.place.id
-                    navigationRequested = false; screen = "detail"
+                    if (drawDialogContext == latestInteractionContext) {
+                        showDraw = false; selectedId = drawnScene.place.id
+                        navigationRequested = false; screen = "detail"
+                    }
                 },
             )
         }
@@ -305,21 +369,26 @@ fun NaekimyeonApp(
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 icon = { Symbol(Glyph.INFO, Ink.Primary, 30.dp) },
-                title = { Text("가볍게 둘러보는 데모") },
-                text = { Text("입력한 말의 일부 키워드를 기기 안에서 준비된 장면과 연결하는 데모예요. 마음을 진단하거나 AI가 자유롭게 해석하지 않아요. 입력 문장은 저장하거나 전송하지 않아요.\n\n장소·이동 시간·주차장 설명은 샘플이며 혼잡도, 날씨와 빈자리는 조회하지 않아요. 이미지는 실제 장소 사진이 아닌 AI 예시예요.") },
+                title = { Text(if (sampleMode) "샘플 둘러보기" else "주변 장소 안내") },
+                text = { Text("입력한 말의 일부 키워드를 기기 안에서 준비된 장면과 연결해요. 마음을 진단하거나 AI가 자유롭게 해석하지 않아요. 입력 문장은 저장하거나 전송하지 않아요.\n\n" +
+                    if (sampleMode) "장소·이동 시간·주차장 설명은 샘플이며 혼잡도, 날씨와 빈자리는 조회하지 않아요. 이미지는 실제 장소 사진이 아닌 AI 예시예요."
+                    else "현재 위치에서 50km 안에 있는 서울·과천 공원 3곳 중에서 찾아요. 전국 장소 검색은 아니에요. 위치는 기기 안에서 직선 거리를 계산하는 데 사용하며, 이동 시간·영업 상태·주차 빈자리는 확인하지 않아요.") },
                 confirmButton = { TextButton(onClick = { showInfo = false }, modifier = Modifier.heightIn(min = 52.dp)) { Text("알겠어요") } },
             )
         }
-        if (showNavigationConfirmation && selected != null && !restricted) {
+        if (showNavigationConfirmation && selected != null && !restricted && !nearbyUnavailable && navigationDialogContext == interactionContext) {
             AlertDialog(
                 onDismissRequest = { showNavigationConfirmation = false },
                 icon = { Symbol(Glyph.PIN, Ink.Primary, 30.dp) },
-                title = { Text("샘플 위치로 연결할까요?") },
-                text = { Text("‘${selected.title}’은 체험용 장소예요. 내비 앱에 서울 지역의 샘플 좌표를 전달해요. 실제 방문할 장소와 경로는 내비 앱에서 확인해 주세요.") },
+                title = { Text(if (selected.provenance.isSample) "샘플 위치로 연결할까요?" else "${selected.title} 안내를 시작할까요?") },
+                text = { Text(if (selected.provenance.isSample) "‘${selected.title}’은 체험용 장소예요. 내비 앱에 서울 지역의 샘플 좌표를 전달해요. 실제 방문할 장소와 경로는 내비 앱에서 확인해 주세요."
+                    else "주차장 입구가 아닌 공원 대표 위치로 내비게이션 안내를 시작할까요?\n\n${selected.visitNote}\n\n이동 시간과 실제 진입로는 내비에서 확인해 주세요.") },
                 confirmButton = {
                     TextButton(onClick = {
-                        showNavigationConfirmation = false; navigationRequested = true; onNavigate(selected)
-                    }, modifier = Modifier.heightIn(min = 52.dp)) { Text("샘플 위치 보내기") }
+                        if (navigationDialogContext == latestInteractionContext) {
+                            showNavigationConfirmation = false; navigationRequested = true; onNavigate(selected)
+                        }
+                    }, modifier = Modifier.heightIn(min = 52.dp)) { Text(if (selected.provenance.isSample) "샘플 위치 보내기" else "대표 위치 보내기") }
                 },
                 dismissButton = { TextButton(onClick = { showNavigationConfirmation = false }, modifier = Modifier.heightIn(min = 52.dp)) { Text("둘러보기 계속") } },
             )
@@ -328,7 +397,7 @@ fun NaekimyeonApp(
 }
 
 @Composable
-private fun AppHeader(screen: String, compact: Boolean, onBack: () -> Unit, onReset: () -> Unit, onInfo: () -> Unit) {
+private fun AppHeader(screen: String, compact: Boolean, sampleMode: Boolean, onBack: () -> Unit, onReset: () -> Unit, onInfo: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 76.dp).padding(horizontal = if (compact) 18.dp else 32.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -354,7 +423,7 @@ private fun AppHeader(screen: String, compact: Boolean, onBack: () -> Unit, onRe
         ) {
             Row(Modifier.padding(horizontal = if (compact) 10.dp else 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Box(Modifier.size(6.dp).background(Ink.Apricot, CircleShape))
-                Text("데모", color = Ink.Apricot, style = MaterialTheme.typography.labelMedium)
+                Text(if (sampleMode) "샘플" else "주변", color = if (sampleMode) Ink.Apricot else Ink.Primary, style = MaterialTheme.typography.labelMedium)
             }
         }
         if (screen != "home") {
@@ -368,6 +437,9 @@ private fun AppHeader(screen: String, compact: Boolean, onBack: () -> Unit, onRe
 private fun HomeScreen(
     wide: Boolean, compact: Boolean, need: Need?, timeCode: String, sameOrigin: Boolean,
     feeling: String, mood: MoodIntent?, unknownFeeling: Boolean, conditionsExpanded: Boolean,
+    sampleMode: Boolean, locationState: LocationState, nearbyCount: Int,
+    onChooseSource: (Boolean) -> Unit, onRequestLocation: () -> Unit,
+    useLocationOnLaunch: Boolean, onUseLocationOnLaunchChanged: (Boolean) -> Unit,
     onToggleConditions: () -> Unit, onFeeling: (String) -> Unit, onMood: (MoodIntent) -> Unit,
     onNeed: (Need) -> Unit, onTime: (String) -> Unit, onSameOrigin: (Boolean) -> Unit, onExplore: () -> Unit,
 ) {
@@ -376,10 +448,13 @@ private fun HomeScreen(
             Box(Modifier.weight(1.05f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     HomeControls(need, timeCode, sameOrigin, false, feeling, mood, unknownFeeling, conditionsExpanded,
-                        onToggleConditions, onFeeling, onMood, onNeed, onTime, onSameOrigin, onExplore)
+                        onToggleConditions, onFeeling, onMood, onNeed, onTime, onSameOrigin, onExplore,
+                        sampleMode, locationState, nearbyCount, onChooseSource, onRequestLocation,
+                        useLocationOnLaunch, onUseLocationOnLaunchChanged)
                 }
             }
-            HomeHero(Modifier.weight(.95f).fillMaxHeight(), tall = true, mood = mood)
+            if (sampleMode) HomeHero(Modifier.weight(.95f).fillMaxHeight(), tall = true, mood = mood)
+            else NearbyHero(Modifier.weight(.95f).fillMaxHeight())
         }
     } else {
         Column(
@@ -387,8 +462,11 @@ private fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
             HomeControls(need, timeCode, sameOrigin, compact, feeling, mood, unknownFeeling, conditionsExpanded,
-                onToggleConditions, onFeeling, onMood, onNeed, onTime, onSameOrigin, onExplore)
-            HomeHero(Modifier.fillMaxWidth().height(if (compact) 240.dp else 300.dp), tall = false, mood = mood)
+                onToggleConditions, onFeeling, onMood, onNeed, onTime, onSameOrigin, onExplore,
+                sampleMode, locationState, nearbyCount, onChooseSource, onRequestLocation,
+                useLocationOnLaunch, onUseLocationOnLaunchChanged)
+            if (sampleMode) HomeHero(Modifier.fillMaxWidth().height(if (compact) 240.dp else 300.dp), tall = false, mood = mood)
+            else NearbyHero(Modifier.fillMaxWidth().height(330.dp))
         }
     }
 }
@@ -399,12 +477,18 @@ private fun HomeControls(
     feeling: String, mood: MoodIntent?, unknownFeeling: Boolean, conditionsExpanded: Boolean,
     onToggleConditions: () -> Unit, onFeeling: (String) -> Unit, onMood: (MoodIntent) -> Unit,
     onNeed: (Need) -> Unit, onTime: (String) -> Unit, onSameOrigin: (Boolean) -> Unit, onExplore: () -> Unit,
+    sampleMode: Boolean, locationState: LocationState, nearbyCount: Int,
+    onChooseSource: (Boolean) -> Unit, onRequestLocation: () -> Unit,
+    useLocationOnLaunch: Boolean, onUseLocationOnLaunchChanged: (Boolean) -> Unit,
 ) {
     Text("계획 없어도, 마음 가는 곳으로", color = Ink.Primary, style = MaterialTheme.typography.labelLarge)
     Spacer(Modifier.height(12.dp))
     Text("어디 가지?", fontSize = if (compact) 42.sp else 52.sp, lineHeight = if (compact) 52.sp else 62.sp,
         fontWeight = FontWeight.Bold, color = Ink.White, modifier = Modifier.semantics { heading() })
-    Text("지금 기분과 시간에 맞춰 가볼 만한 곳을 골라드려요.", fontSize = if (compact) 22.sp else 26.sp, lineHeight = 36.sp, color = Ink.Muted)
+    Text(if (sampleMode) "지금 기분과 시간에 맞춰 가볼 만한 곳을 골라드려요." else "지금 기분에 맞춰 가볼 만한 곳을 골라드려요.", fontSize = if (compact) 22.sp else 26.sp, lineHeight = 36.sp, color = Ink.Muted)
+    Spacer(Modifier.height(22.dp))
+    DiscoverySourcePanel(sampleMode, locationState, nearbyCount, onChooseSource, onRequestLocation,
+        useLocationOnLaunch, onUseLocationOnLaunchChanged)
     Spacer(Modifier.height(24.dp))
     SectionLabel("지금 기분이나 하고 싶은 일", "선택")
     Spacer(Modifier.height(12.dp))
@@ -458,17 +542,20 @@ private fun HomeControls(
                 Checkbox(checked = sameOrigin, onCheckedChange = onSameOrigin)
                 Column(Modifier.weight(1f)) {
                     Text("출발한 곳으로 돌아오기", style = MaterialTheme.typography.bodyMedium, color = Ink.White)
-                    Text(if (sameOrigin) "왕복 이동과 여유 5분을 함께 계산해요" else "선택하면 왕복 기준으로 머물 시간을 계산해요", style = MaterialTheme.typography.bodySmall, color = Ink.Muted)
+                    Text(if (!sampleMode) "이동 시간을 몰라 왕복 가능 여부는 내비에서 확인해야 해요"
+                        else if (sameOrigin) "왕복 이동과 여유 5분을 함께 계산해요" else "선택하면 왕복 기준으로 머물 시간을 계산해요", style = MaterialTheme.typography.bodySmall, color = Ink.Muted)
                 }
             }
         }
     }
     Spacer(Modifier.height(28.dp))
-    PrimaryAction("추천 장소 보기", onExplore, Modifier.fillMaxWidth())
+    PrimaryAction("추천 장소 보기", onExplore, Modifier.fillMaxWidth(), enabled = sampleMode || (locationState.isUsable && nearbyCount > 0))
     Spacer(Modifier.height(12.dp))
-    Text("고르지 않아도 괜찮아요. 서울 지역 샘플을 보여드려요.", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+    Text(if (sampleMode) "고르지 않아도 괜찮아요. 서울 지역 샘플을 보여드려요."
+        else "기분을 고르지 않아도 괜찮아요. 준비된 주변 장소부터 살펴보세요.", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
     Spacer(Modifier.height(8.dp))
-    Text("샘플 장소 · 예상 정보 · 실시간 위치와 교통 미반영", color = Ink.Apricot, style = MaterialTheme.typography.bodySmall)
+    Text(if (sampleMode) "샘플 장소 · 예상 정보 · 실시간 위치와 교통 미반영"
+        else "서울·과천 공원 3곳 중 · 직선 거리 기준 · 이동 시간 미확인", color = Ink.Apricot, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -496,7 +583,7 @@ private fun HomeHero(modifier: Modifier, tall: Boolean, mood: MoodIntent?) {
 
 @Composable
 private fun ResultsScreen(
-    result: SceneResult, request: RecommendationRequest, compact: Boolean,
+    result: SceneResult, request: RecommendationRequest, compact: Boolean, sampleMode: Boolean,
     feeling: String, mood: MoodIntent?, onVariation: () -> Unit, onDraw: () -> Unit,
     onEdit: () -> Unit, onRelax: () -> Unit, onPlace: (Place) -> Unit,
 ) {
@@ -505,7 +592,7 @@ private fun ResultsScreen(
             Column(Modifier.weight(1f)) {
                 Text("지금 가볼 만한 곳", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
                 Spacer(Modifier.height(6.dp))
-                Text(requestSummary(request), color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+                Text(requestSummary(request, sampleMode), color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
             }
             TextButton(onClick = onEdit, modifier = Modifier.heightIn(min = 52.dp)) { Text("조건 바꾸기") }
         }
@@ -516,7 +603,7 @@ private fun ResultsScreen(
             Text(mood?.shortLabel.orEmpty(), color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
         }
         Spacer(Modifier.height(20.dp))
-        SampleNote()
+        SourceNote(sampleMode = sampleMode)
         Spacer(Modifier.height(22.dp))
         when (result) {
             is SceneResult.Ready -> {
@@ -530,14 +617,16 @@ private fun ResultsScreen(
                         Symbol(Glyph.MARK, Ink.Apricot, 31.dp)
                         Column(Modifier.weight(1f)) {
                             Text("하나만 바로 추천받기", color = Ink.Primary, style = MaterialTheme.typography.titleLarge)
-                            Text("조건에 맞는 ${result.scenes.size}곳 중 하나를 바로 골라드려요", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+                            Text(if (!sampleMode && request.time is TimePreference.Bounded) "이동 시간 확인이 필요한 ${result.scenes.size}곳 중에서 제안해요"
+                                else "조건에 맞는 ${result.scenes.size}곳 중 하나를 바로 골라드려요", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
                         }
                         Symbol(Glyph.ARROW, Ink.Primary)
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                if (request.time is TimePreference.Bounded && request.returnPlan == ReturnPlan.UNSPECIFIED) {
-                    InfoStrip("돌아올 기준을 정하면, 머물 수 있는 시간도 살펴볼 수 있어요.", Ink.Apricot)
+                if (request.time is TimePreference.Bounded && (!sampleMode || request.returnPlan == ReturnPlan.UNSPECIFIED)) {
+                    InfoStrip(if (sampleMode) "돌아올 기준을 정하면, 머물 수 있는 시간도 살펴볼 수 있어요."
+                        else "이동 시간은 아직 몰라요. 선택한 시간 안에 다녀올 수 있는지는 내비에서 확인해 주세요.", Ink.Apricot)
                     Spacer(Modifier.height(18.dp))
                 }
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -576,7 +665,9 @@ private fun ResultsScreen(
                     EmptyReason.MISSING_TRAVEL_ESTIMATES -> "왕복 시간을 모르는 장소는 시간 안에 다녀올 수 있다고 안내하지 않아요. 시간 조건을 풀고 살펴볼 수 있어요."
                     else -> "선택을 조금 바꾸면 다른 제안을 만날 수 있어요."
                 }
-                EmptyPanel(title, body, "시간 제한 없이 살펴보기", onRelax)
+                if (result.reason == EmptyReason.NO_MATCHING_NEED || result.reason == EmptyReason.NO_PLACES) {
+                    EmptyPanel(title, body, "조건 바꾸기", onEdit)
+                } else EmptyPanel(title, body, "시간 제한 없이 살펴보기", onRelax)
             }
         }
     }
@@ -619,9 +710,13 @@ private fun SceneDrawDialog(
                 Spacer(Modifier.height(15.dp))
                 HorizontalDivider(color = Ink.Line)
                 Spacer(Modifier.height(13.dp))
-                Text("가는 길 약 ${place.outboundMinutes ?: "?"}분", color = Ink.White, style = MaterialTheme.typography.titleMedium)
+                Text(place.distanceLabel() ?: place.travelLabel(), color = Ink.White, style = MaterialTheme.typography.titleMedium)
+                if (!place.provenance.isSample) {
+                    Spacer(Modifier.height(5.dp))
+                    Text(place.travelLabel(), color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+                }
                 Spacer(Modifier.height(7.dp))
-                Text(if (place.parking.facility == FacilityState.UNKNOWN) "주차 정보 미확인 · 빈자리 미확인" else "주차장 연결 예시 · 빈자리 미확인",
+                Text(place.parkingLabel(),
                     color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 val budgetText = when (recommendation.budgetStatus) {
@@ -629,10 +724,11 @@ private fun SceneDrawDialog(
                     BudgetStatus.NO_DEADLINE -> "시간 제한 없이 · 체류 시간은 정하지 않았어요"
                     BudgetStatus.NOT_SET -> "시간 미정 · 체류 시간은 계산하지 않았어요"
                     BudgetStatus.RETURN_PLAN_NEEDED -> "복귀 기준 미정 · 체류 시간은 계산하지 않았어요"
+                    BudgetStatus.TRAVEL_ESTIMATE_NEEDED -> "선택한 시간 안에 다녀올 수 있는지는 내비에서 확인해 주세요."
                 }
                 Text(budgetText, color = Ink.Primary, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(12.dp))
-                SampleNote()
+                SourceNote(place)
                 Spacer(Modifier.height(7.dp))
                 Text("활동은 안전하게 도착한 뒤, 원할 때만 해 보세요.", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
             }
@@ -681,18 +777,25 @@ private fun PlaceCardContent(item: SceneSuggestion) {
     Spacer(Modifier.height(18.dp))
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Symbol(Glyph.CLOCK, Ink.Primary, 21.dp)
-        Text("가는 길 약 ${place.outboundMinutes ?: "?"}분", color = Ink.White, style = MaterialTheme.typography.titleMedium)
+        Text(place.distanceLabel() ?: place.travelLabel(), color = Ink.White, style = MaterialTheme.typography.titleMedium)
+    }
+    if (!place.provenance.isSample) {
+        Spacer(Modifier.height(6.dp))
+        Text(place.travelLabel(), color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
     }
     Spacer(Modifier.height(9.dp))
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Symbol(Glyph.PARKING, Ink.Muted, 21.dp)
-        Text(if (place.parking.facility == FacilityState.UNKNOWN) "주차 정보 미확인" else "주차장 정보 예시 · 빈자리 미확인", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+        Text(place.parkingLabel(), color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
     }
     if (recommendation.stayMinutes != null) {
         Spacer(Modifier.height(14.dp))
         Surface(color = Ink.Deep, shape = RoundedCornerShape(10.dp)) {
             Text("약 ${recommendation.stayMinutes}분 머물 수 있어요", Modifier.padding(horizontal = 12.dp, vertical = 9.dp), color = Ink.Primary, style = MaterialTheme.typography.labelMedium)
         }
+    } else if (recommendation.budgetStatus == BudgetStatus.TRAVEL_ESTIMATE_NEEDED) {
+        Spacer(Modifier.height(14.dp))
+        Text("이동 시간 확인 필요", color = Ink.Apricot, style = MaterialTheme.typography.labelMedium)
     }
     Spacer(Modifier.height(19.dp))
     HorizontalDivider(color = Ink.Line)
@@ -704,6 +807,15 @@ private fun PlaceCardContent(item: SceneSuggestion) {
 
 @Composable
 private fun PlacePhoto(place: Place, modifier: Modifier, index: Int? = null) {
+    if (!place.provenance.isSample) {
+        Box(modifier.clip(RoundedCornerShape(18.dp)).background(Brush.verticalGradient(listOf(Ink.Raised, Ink.Deep)))
+            .semantics { contentDescription = "${place.title} 안내 그림, 실제 장소 사진이 아님" }) {
+            Symbol(Glyph.PIN, Ink.Primary.copy(alpha = .65f), 54.dp, Modifier.align(Alignment.Center))
+            Text("장소 안내 그림", Modifier.align(Alignment.TopStart).padding(15.dp), color = Ink.Muted, style = MaterialTheme.typography.labelMedium)
+            Text(place.title, Modifier.align(Alignment.BottomStart).padding(18.dp), color = Ink.White, style = MaterialTheme.typography.titleMedium)
+        }
+        return
+    }
     Box(modifier.clip(RoundedCornerShape(18.dp))) {
         Image(painterResource(imageResource(place)), "${place.title} 분위기의 AI 예시 이미지", Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
             alignment = if (place.image == PlaceImage.GARDEN) Alignment.CenterEnd else Alignment.Center)
@@ -727,7 +839,7 @@ private fun DetailScreen(
             Column(Modifier.weight(.95f).fillMaxHeight()) {
                 PlacePhoto(place, Modifier.fillMaxWidth().weight(1f))
                 Spacer(Modifier.height(14.dp))
-                Text("이미지는 장소 분위기를 표현한 AI 예시예요.", style = MaterialTheme.typography.bodySmall, color = Ink.Muted)
+                Text(if (place.provenance.isSample) "이미지는 장소 분위기를 표현한 AI 예시예요." else "안내 그림이며, 실제 장소 사진이 아니에요.", style = MaterialTheme.typography.bodySmall, color = Ink.Muted)
             }
             Column(Modifier.weight(1.05f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                 DetailContent(place, scene, request, navigationStatus, onNavigate, onFeedback)
@@ -753,6 +865,10 @@ private fun DetailContent(
     Text(scene?.title ?: place.title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
     Spacer(Modifier.height(8.dp))
     Text(place.title, color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+    if (place.address.isNotBlank()) {
+        Spacer(Modifier.height(5.dp))
+        Text(place.address, color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+    }
     Spacer(Modifier.height(14.dp))
     Text(scene?.rationale ?: place.description, color = Ink.Muted, style = MaterialTheme.typography.bodyLarge)
     if (scene != null) {
@@ -770,9 +886,15 @@ private fun DetailContent(
     Spacer(Modifier.height(22.dp))
     Surface(color = Ink.Panel, shape = RoundedCornerShape(20.dp)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            DetailRow(Glyph.CLOCK, "가는 길", "약 ${place.outboundMinutes ?: "?"}분", "샘플 예상 · 현재 교통 미반영")
+            if (place.provenance.isSample) {
+                DetailRow(Glyph.CLOCK, "가는 길", place.outboundMinutes?.let { "약 ${it}분" } ?: "미확인", "샘플 예상 · 현재 교통 미반영")
+            } else {
+                DetailRow(Glyph.PIN, "거리", place.distanceLabel() ?: "거리 정보 미확인", "직선 거리 기준 · 실제 주행 거리와 달라요")
+                HorizontalDivider(color = Ink.Line)
+                DetailRow(Glyph.CLOCK, "이동", "시간 미확인", "이동 시간과 실제 진입로는 내비에서 확인해 주세요.")
+            }
             HorizontalDivider(color = Ink.Line)
-            DetailRow(Glyph.PARKING, "주차", if (place.parking.facility == FacilityState.UNKNOWN) "정보 미확인" else "주차장 연결 예시", "${place.parking.note}\n빈자리 · 요금 · 운영시간 미확인")
+            DetailRow(Glyph.PARKING, "주차", if (place.parking.facility == FacilityState.UNKNOWN) "정보 미확인" else if (place.provenance.isSample) "주차장 연결 예시" else "시설 정보 등록", "${place.parking.note}\n빈자리 · 요금 · 운영시간 미확인")
         }
     }
     Spacer(Modifier.height(16.dp))
@@ -791,10 +913,21 @@ private fun DetailContent(
         }
         Spacer(Modifier.height(16.dp))
     } else if (request.time is TimePreference.Bounded) {
-        InfoStrip("돌아올 기준이 정해지지 않아 체류 시간은 계산하지 않았어요.", Ink.Apricot)
+        InfoStrip(if (place.provenance.isSample) "돌아올 기준이 정해지지 않아 체류 시간은 계산하지 않았어요."
+            else "이동 시간이 없어 체류 시간을 계산하지 않았어요. 선택한 시간 안에 다녀올 수 있는지는 내비에서 확인해 주세요.", Ink.Apricot)
         Spacer(Modifier.height(16.dp))
     }
-    SampleNote()
+    if (place.visitNote.isNotBlank()) {
+        InfoStrip(place.visitNote, Ink.Apricot)
+        Spacer(Modifier.height(15.dp))
+    }
+    SourceNote(place)
+    if (!place.provenance.isSample) {
+        Spacer(Modifier.height(9.dp))
+        Text("자료: ${place.provenance.label}", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+        place.provenance.checkedOn?.let { Text("자료 확인: $it", color = Ink.Muted, style = MaterialTheme.typography.bodySmall) }
+        place.provenance.sourceUrl?.let { Text(it, color = Ink.Muted, style = MaterialTheme.typography.bodySmall) }
+    }
     Spacer(Modifier.height(23.dp))
     PrimaryAction("내비로 연결", onNavigate, Modifier.fillMaxWidth(), Glyph.PIN)
     Spacer(Modifier.height(8.dp))
@@ -853,6 +986,7 @@ private fun FeedbackScreen(place: Place, feedback: String, onFeedback: (String) 
 @Composable
 private fun DriverPanel(
     scene: SceneSuggestion?, canShowAnother: Boolean, maxStringLength: Int,
+    locationNotice: String?,
     status: String, onNext: () -> Unit, onNavigate: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) {
@@ -879,14 +1013,17 @@ private fun DriverPanel(
             if (scene != null) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    Text(limited(scene.place.outboundMinutes?.let { "가는 길 약 ${it}분" } ?: "이동 시간 미확인"),
+                    Text(limited(scene.place.distanceLabel() ?: scene.place.travelLabel()),
                         color = Ink.White, fontSize = if (short) 20.sp else 25.sp, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text(limited("주차 빈자리 미확인"), color = Ink.Muted, fontSize = if (short) 17.sp else 20.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 }
+                if (!scene.place.provenance.isSample) {
+                    Text(limited("이동 시간 미확인 · 대표 위치 안내"), color = Ink.Muted, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
-            Text(limited("서울 지역 샘플 · 실시간 정보 아님"), color = Ink.Apricot, fontSize = 17.sp,
+            Text(limited(if (scene?.place?.provenance?.isSample == false) "${locationNotice ?: "등록 공원 정보"} · 실시간 정보 아님" else "서울 지역 샘플 · 실시간 정보 아님"), color = Ink.Apricot, fontSize = 17.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             val navigateLabel = limited(scene?.place?.let { "${it.title} 안내" } ?: "안내할 곳 없음")
             if (stackedButtons) {
@@ -973,9 +1110,9 @@ private fun ChoiceChip(text: String, selected: Boolean, glyph: Glyph? = null, on
 }
 
 @Composable
-private fun PrimaryAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, glyph: Glyph = Glyph.ARROW) {
+private fun PrimaryAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, glyph: Glyph = Glyph.ARROW, enabled: Boolean = true) {
     Button(
-        onClick = onClick, modifier = modifier.heightIn(min = 62.dp),
+        onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 62.dp),
         shape = RoundedCornerShape(17.dp), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Ink.Primary, contentColor = Ink.Deep),
     ) {
@@ -986,10 +1123,11 @@ private fun PrimaryAction(text: String, onClick: () -> Unit, modifier: Modifier 
 }
 
 @Composable
-private fun SampleNote() {
+private fun SourceNote(place: Place? = null, sampleMode: Boolean = place?.provenance?.isSample ?: true) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Symbol(Glyph.INFO, Ink.Apricot, 18.dp)
-        Text("샘플 장소 · 예상 정보 · 실시간 정보 아님", color = Ink.Apricot, style = MaterialTheme.typography.bodySmall)
+        Text(place?.sourceLabel() ?: if (sampleMode) "샘플 장소 · 예상 정보 · 실시간 정보 아님"
+            else "서울·과천 공원 3곳 중 · 직선 거리 기준 · 실시간 정보 아님", color = Ink.Apricot, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1021,12 +1159,13 @@ private fun moodGlyph(mood: MoodIntent) = when (mood) {
     MoodIntent.DISCOVERY -> Glyph.MARK; MoodIntent.REST -> Glyph.CLOCK
 }
 private fun imageResource(place: Place) = if (place.image == PlaceImage.CAFE) R.drawable.cafe_concept else R.drawable.riverside_concept
-private fun requestSummary(request: RecommendationRequest): String {
+private fun requestSummary(request: RecommendationRequest, sampleMode: Boolean = true): String {
     val need = request.needs.firstOrNull()?.let { needLabel(it) } ?: "마음은 열어 두고"
     val time = when (val time = request.time) {
         TimePreference.Unspecified -> "시간은 아직 미정"
         TimePreference.Unlimited -> "시간 제한 없이"
-        is TimePreference.Bounded -> if (request.returnPlan == ReturnPlan.SAME_ORIGIN) "${time.minutes}분 안에 돌아오기" else "여유 ${time.minutes}분 · 복귀 기준 미정"
+        is TimePreference.Bounded -> if (!sampleMode) "여유 ${time.minutes}분 · 이동 시간 확인 필요"
+            else if (request.returnPlan == ReturnPlan.SAME_ORIGIN) "${time.minutes}분 안에 돌아오기" else "여유 ${time.minutes}분 · 복귀 기준 미정"
     }
     return "$need  ·  $time"
 }

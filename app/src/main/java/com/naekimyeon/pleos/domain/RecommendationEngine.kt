@@ -6,7 +6,8 @@ class RecommendationEngine {
         if (places.isEmpty()) return RecommendationResult.Empty(EmptyReason.NO_PLACES)
         val matching = places.distinctBy { it.id }.filter { place ->
             request.needs.isEmpty() || request.needs.all { it in place.needs }
-        }.sortedWith(compareBy<Place> { it.outboundMinutes ?: Int.MAX_VALUE }.thenBy { it.id })
+        }.sortedWith(compareBy<Place> { it.outboundMinutes ?: Int.MAX_VALUE }
+            .thenBy { it.straightLineDistanceMeters ?: Double.MAX_VALUE }.thenBy { it.id })
         if (matching.isEmpty()) return RecommendationResult.Empty(EmptyReason.NO_MATCHING_NEED)
 
         val bounded = request.time as? TimePreference.Bounded
@@ -16,6 +17,11 @@ class RecommendationEngine {
             when {
                 request.time == TimePreference.Unlimited -> Recommendation(place, BudgetStatus.NO_DEADLINE)
                 request.time == TimePreference.Unspecified -> Recommendation(place, BudgetStatus.NOT_SET)
+                // Real places can be browsed without pretending they fit the user's deadline.
+                // Demo fixture behavior remains unchanged for the submitted 0.2 flows.
+                !place.provenance.isSample &&
+                    (place.outboundMinutes == null || place.returnMinutes == null || place.accessMinutes == null) ->
+                    Recommendation(place, BudgetStatus.TRAVEL_ESTIMATE_NEEDED)
                 !canEstimate -> Recommendation(place, BudgetStatus.RETURN_PLAN_NEEDED)
                 else -> {
                     val outbound = place.outboundMinutes
