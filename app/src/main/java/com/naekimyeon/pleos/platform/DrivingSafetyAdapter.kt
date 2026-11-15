@@ -20,8 +20,15 @@ data class DrivingSafetyState(
         SafetyCapability.AVAILABLE -> if (restricted) "차량 이용 제한 중" else "상세 조작 가능 · 차량 이용 제한 없음"
         SafetyCapability.UNAVAILABLE -> "차량 안전 상태를 확인할 수 없어 간단한 화면을 표시해요"
         SafetyCapability.PERMISSION_DENIED -> "차량 안전 상태 접근 권한을 사용할 수 없어요"
-    }
-)
+    },
+    val maxRestrictedStringLength: Int = 0,
+    val maxCumulativeContentItems: Int = 0,
+    val maxContentDepth: Int = 0
+) {
+    val isKnown: Boolean get() = capability == SafetyCapability.AVAILABLE
+    // restricted means a distraction-optimized experience is required, not that every action is banned.
+    val requiresDistractionOptimization: Boolean get() = restricted
+}
 
 /** Fail-closed AAOS restrictions; never infer a parked state from speed, gear or missing data. */
 class DrivingSafetyAdapter(context: Context, private val onState: (DrivingSafetyState) -> Unit) : AutoCloseable {
@@ -90,6 +97,9 @@ class DrivingSafetyAdapter(context: Context, private val onState: (DrivingSafety
                 capability = SafetyCapability.AVAILABLE,
                 restricted = restricted,
                 activeRestrictions = restrictions.activeRestrictions,
+                maxRestrictedStringLength = restrictions.maxRestrictedStringLength,
+                maxCumulativeContentItems = restrictions.maxCumulativeContentItems,
+                maxContentDepth = restrictions.maxContentDepth,
                 message = if (restricted) "차량 이용 제한 중 · 간단한 안내만 표시해요" else "상세 조작 가능 · 차량 이용 제한 없음"
             )
         )

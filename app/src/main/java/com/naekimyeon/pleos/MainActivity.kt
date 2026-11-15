@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private var safety by mutableStateOf(DrivingSafetyState(SafetyCapability.CONNECTING))
     private var incoming by mutableStateOf<IncomingRequest?>(null)
     private var requestSequence = 0L
+    private var navigationPlaceId by mutableStateOf<String?>(null)
     private var pendingGleo: Pair<Long, GleoBreakRequest>? = null
     private var pendingDeadline = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -49,8 +50,9 @@ class MainActivity : ComponentActivity() {
             try {
                 safetyAdapter = DrivingSafetyAdapter(this) {
                     safety = it
-                    if (it.capability != SafetyCapability.AVAILABLE || it.restricted) {
-                        failPendingGleo("The sample request was cancelled because vehicle interaction is restricted.")
+                    if (it.isKnown) dispatchPendingWhenReady()
+                    else if (it.capability != SafetyCapability.CONNECTING) {
+                        failPendingGleo("The vehicle interaction state is unavailable. Please try again when the vehicle service is connected.")
                     }
                 }.also { it.start() }
             } catch (error: LinkageError) {
@@ -64,12 +66,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             NaekimyeonApp(
                 navigationStatus = navigation.message,
+                navigationPlaceId = navigationPlaceId,
                 onNavigate = ::navigateAfterConfirmation,
                 restricted = safety.capability != SafetyCapability.AVAILABLE || safety.restricted,
                 restrictionMessage = safety.message,
                 incomingRequest = incoming,
                 onIncomingRequestApplied = ::onIncomingApplied,
                 onIncomingFeelingUnmatched = ::onIncomingFeelingUnmatched,
+                drivingAvailable = safety.isKnown,
+                drivingMaxStringLength = if (safety.activeRestrictions and 4 != 0)
+                    safety.maxRestrictedStringLength.coerceAtLeast(0) else 120,
+                drivingMaxCandidates = if (safety.activeRestrictions and 32 != 0) {
+                    if (safety.maxContentDepth < 1) 0 else safety.maxCumulativeContentItems.coerceIn(0, 3)
+                } else 3,
+                onDrivingCandidateApplied = ::onDrivingCandidateApplied,
             )
         }
         // Launcher recreation does not re-deliver external actions already handled by this process.
@@ -88,10 +98,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun navigateAfterConfirmation(place: Place) {
-        if (safety.capability != SafetyCapability.AVAILABLE || safety.restricted) {
-            navigation = NavigationState(NavigationStatus.FAILED, "차량 이용 제한이 해제된 뒤 다시 선택해 주세요")
+        val contentBlocked = safety.restricted && safety.activeRestrictions and 32 != 0 &&
+            (safety.maxCumulativeContentItems < 1 || safety.maxContentDepth < 1)
+        val confirmationTooLong = safety.restricted && safety.activeRestrictions and 4 != 0 &&
+            safety.maxRestrictedStringLength < "${place.title} 안내".length
+        if (!safety.isKnown || contentBlocked || confirmationTooLong) {
+            navigation = NavigationState(NavigationStatus.FAILED, "차량 상태를 확인한 뒤 다시 선택해 주세요")
             return
         }
+        navigationPlaceId = place.id
         navi?.navigate(place.latitude, place.longitude, place.title)
     }
 
@@ -105,39 +120,69 @@ class MainActivity : ComponentActivity() {
                     GleoBridge.respond(this, GleoResponseStatus.FAIL, "Another sample request is being opened. Please wait.")
                     return
                 }
-                if (safety.capability != SafetyCapability.AVAILABLE || safety.restricted) {
-                    GleoBridge.respond(this, GleoResponseStatus.FAIL, "Detailed sample suggestions are unavailable while vehicle interaction is restricted or unknown.")
+                if (!safety.isKnown && safety.capability != SafetyCapability.CONNECTING) {
+                    GleoBridge.respond(this, GleoResponseStatus.FAIL, "The vehicle interaction state is unavailable.")
                     return
                 }
                 val request = result.request
-                val need = when (request.need) {
-                    "breeze" -> Need.BREEZE
-                    "conversation" -> Need.CONVERSATION
-                    "shelter" -> Need.SHELTER
-                    null -> null
-                    else -> return
-                }
                 val id = ++requestSequence
                 pendingGleo = id to request
                 pendingDeadline = SystemClock.elapsedRealtime() + 6_000L
                 mainHandler.postDelayed(gleoTimeout, 6_000L)
-                incoming = IncomingRequest(id, need, request.timeMinutes, request.noTimeLimit, request.feeling)
+                dispatchPendingWhenReady()
             }
         }
+    }
+
+    private fun dispatchPendingWhenReady() {
+        val pending = pendingGleo ?: return
+        if (!safety.isKnown || incoming != null) return
+        if (SystemClock.elapsedRealtime() > pendingDeadline) {
+            failPendingGleo("The request expired before the vehicle state was available.")
+            return
+        }
+        val request = pending.second
+        val need = when (request.need) {
+            "breeze" -> Need.BREEZE
+            "conversation" -> Need.CONVERSATION
+            "shelter" -> Need.SHELTER
+            else -> null
+        }
+        incoming = IncomingRequest(pending.first, need, request.timeMinutes, request.noTimeLimit, request.feeling)
     }
 
     private fun onIncomingApplied(id: Long) {
         val pending = pendingGleo ?: return
         if (pending.first != id) return
         if (SystemClock.elapsedRealtime() > pendingDeadline ||
-            safety.capability != SafetyCapability.AVAILABLE || safety.restricted) {
-            failPendingGleo("The sample request expired or vehicle interaction became restricted.")
+            !safety.isKnown) {
+            failPendingGleo("The sample request expired or vehicle state became unavailable.")
+            return
+        }
+        // A transition to driving must be acknowledged by the actual compact candidate callback.
+        if (safety.restricted) return
+        mainHandler.removeCallbacks(gleoTimeout)
+        pendingGleo = null
+        incoming = null
+        GleoBridge.respondSampleOpened(this, pending.second)
+    }
+
+    private fun onDrivingCandidateApplied(id: Long, place: Place?) {
+        val pending = pendingGleo ?: return
+        if (pending.first != id) return
+        if (!safety.isKnown || SystemClock.elapsedRealtime() > pendingDeadline) {
+            failPendingGleo("The request expired or the vehicle state is unavailable.")
             return
         }
         mainHandler.removeCallbacks(gleoTimeout)
         pendingGleo = null
         incoming = null
-        GleoBridge.respondSampleOpened(this, pending.second)
+        if (place == null) {
+            GleoBridge.respond(this, GleoResponseStatus.ASKING,
+                "No sample destination fits these conditions. Please change the request by voice or when unrestricted.")
+        } else {
+            GleoBridge.respondDrivingCandidate(this, pending.second, place.title)
+        }
     }
 
     private fun onIncomingFeelingUnmatched(id: Long) {

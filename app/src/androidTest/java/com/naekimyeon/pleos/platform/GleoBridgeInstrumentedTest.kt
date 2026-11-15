@@ -242,6 +242,33 @@ class GleoBridgeInstrumentedTest {
         assertFalse(data.getBoolean("navigationStarted"))
     }
 
+    @Test fun drivingCallbackProvidesExactlyOneCandidateAndRequiresExplicitNavigation() {
+        val context = RecordingContext()
+        val phrase = "답답해서 잠깐 바람을 쐬고 싶어"
+        assertTrue(GleoBridge.respondDrivingCandidate(context, GleoBreakRequest(null, feeling = phrase), "강변 산책길"))
+        val raw = context.broadcast!!.getStringExtra("response")!!
+        assertFalse(raw.contains(phrase))
+        val response = JSONObject(raw)
+        assertEquals("success", response.getString("status"))
+        assertEquals("voice", response.getString("mode"))
+        val candidates = JSONArray(response.getString("data"))
+        assertEquals(1, candidates.length())
+        val candidate = candidates.getJSONObject(0)
+        assertEquals("강변 산책길", candidate.getString("candidateTitle"))
+        assertEquals("sample", candidate.getString("dataSource"))
+        assertTrue(candidate.getBoolean("confirmationRequired"))
+        assertFalse(candidate.getBoolean("navigationStarted"))
+        assertFalse(candidate.getBoolean("liveRecommendationConnected"))
+    }
+
+    @Test fun missingDrivingCandidateCannotBeAcknowledgedAsSuccess() {
+        val context = RecordingContext()
+        assertTrue(GleoBridge.respondDrivingCandidate(context, GleoBreakRequest("breeze"), "   "))
+        val response = JSONObject(context.broadcast!!.getStringExtra("response")!!)
+        assertEquals("fail", response.getString("status"))
+        assertFalse(response.has("data"))
+    }
+
     private class RecordingContext : ContextWrapper(InstrumentationRegistry.getInstrumentation().targetContext) {
         var broadcast: Intent? = null
         var reject = false

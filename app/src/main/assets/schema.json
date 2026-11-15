@@ -1,7 +1,7 @@
 {
   "packageName": "com.naekimyeon.pleos",
-  "appDescription": "An app that helps users explore short-break experiences based on their explicitly expressed feelings, available time, and preferred activity. The current version presents sample candidates and requires separate user confirmation for navigation.",
-  "version": "0.1.0-demo",
+  "appDescription": "A vehicle outing companion that suggests sample places and activities from explicit preferences. While driving it presents one concise candidate and requires an explicit guidance confirmation; detailed comparison is available when unrestricted.",
+  "version": "0.2.0-demo",
   "actionCalls": [
     {
       "type": "function",
@@ -13,7 +13,11 @@
           "properties": {
             "need": {
               "type": "string",
-              "enum": ["breeze", "conversation", "shelter"],
+              "enum": [
+                "breeze",
+                "conversation",
+                "shelter"
+              ],
               "description": "The user's explicit preferred break activity: outdoor fresh air, conversation, or shelter, omitted when only a feeling is supplied."
             },
             "feeling": {

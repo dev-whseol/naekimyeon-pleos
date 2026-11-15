@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.naekimyeon.pleos.R
 import com.naekimyeon.pleos.domain.*
+import kotlinx.coroutines.delay
 
 /** Native Compose UI; all displayed place/travel data is deliberately an offline demo fixture. */
 @Composable
@@ -49,6 +50,11 @@ fun NaekimyeonApp(
     onIncomingRequestApplied: (Long) -> Unit = {},
     restrictionMessage: String = "차량 이용 제한 중",
     onIncomingFeelingUnmatched: (Long) -> Unit = {},
+    drivingAvailable: Boolean = false,
+    onDrivingCandidateApplied: (Long, Place?) -> Unit = { _, _ -> },
+    drivingMaxStringLength: Int = 120,
+    drivingMaxCandidates: Int = 3,
+    navigationPlaceId: String? = null,
 ) {
     NaekimyeonTheme {
         val keyboard = LocalSoftwareKeyboardController.current
@@ -70,6 +76,15 @@ fun NaekimyeonApp(
         var variation by rememberSaveable { mutableIntStateOf(0) }
         var showDraw by remember { mutableStateOf(false) }
         var drawnPlaceId by rememberSaveable { mutableStateOf("") }
+        var pendingDriverIncomingId by remember { mutableStateOf<Long?>(null) }
+        var pendingDriverPlaceId by remember { mutableStateOf<String?>(null) }
+        var nextCoolingDown by remember { mutableStateOf(false) }
+        LaunchedEffect(nextCoolingDown) {
+            if (nextCoolingDown) {
+                delay(2_000)
+                nextCoolingDown = false
+            }
+        }
         val mood = MoodIntent.entries.firstOrNull { it.name == moodName }
         val need = Need.entries.firstOrNull { it.name == needName }
         val time = when (timeCode) {
@@ -88,18 +103,45 @@ fun NaekimyeonApp(
         val selectedScene = (result as? SceneResult.Ready)?.scenes?.firstOrNull { it.place.id == selectedId }
         val eligibleScenes = (result as? SceneResult.Ready)?.scenes.orEmpty()
         val drawnScene = eligibleScenes.firstOrNull { it.place.id == drawnPlaceId }
-        LaunchedEffect(incomingRequest?.id, restricted) {
+        val driverScenes = eligibleScenes.take(drivingMaxCandidates.coerceIn(0, 3))
+        val driverScene = driverScenes.firstOrNull { it.place.id == selectedId } ?: driverScenes.firstOrNull()
+        val unappliedIncomingForFrame = incomingRequest != null && incomingRequest.id != lastIncomingId
+        val pendingDriverIdForFrame = pendingDriverIncomingId
+        val pendingDriverPlaceForFrame = pendingDriverPlaceId
+        LaunchedEffect(incomingRequest?.id, restricted, drivingAvailable) {
             if (restricted) {
                 showNavigationConfirmation = false
                 showInfo = false
                 showDraw = false
                 keyboard?.hide()
+                if (!drivingAvailable) pendingDriverIncomingId = null
             }
-            incomingRequest?.takeIf { !restricted && it.id != lastIncomingId }?.let { incoming ->
+            incomingRequest?.takeIf { (!restricted || drivingAvailable) && it.id != lastIncomingId }?.let { incoming ->
+                val incomingFeeling = incoming.feeling.orEmpty().take(MoodInterpreter.MAX_INPUT_LENGTH)
+                val interpretation = MoodInterpreter().interpret(incomingFeeling)
+                if (restricted && interpretation == MoodInterpretation.Unknown) {
+                    unknownFeeling = true
+                    lastIncomingId = incoming.id
+                    onIncomingFeelingUnmatched(incoming.id)
+                    return@let
+                }
+                val incomingMood = (interpretation as? MoodInterpretation.Matched)?.mood
+                val incomingTime = when {
+                    incoming.unlimited -> TimePreference.Unlimited
+                    incoming.minutes != null && incoming.minutes in 1..240 -> TimePreference.Bounded(incoming.minutes)
+                    else -> TimePreference.Unspecified
+                }
+                val incomingConditions = RecommendationRequest(
+                    needs = incoming.need?.let { setOf(it) } ?: emptySet(),
+                    time = incomingTime, returnPlan = ReturnPlan.UNSPECIFIED,
+                )
+                val incomingDriverCandidate = if (restricted && drivingAvailable) {
+                    (SceneRecommender().recommend(DemoPlaces.places, incomingConditions, incomingMood) as? SceneResult.Ready)
+                        ?.scenes?.take(drivingMaxCandidates.coerceIn(0, 3))?.firstOrNull()
+                } else null
                 needName = incoming.need?.name.orEmpty()
                 conditionsExpanded = incoming.need != null
-                feeling = incoming.feeling.orEmpty().take(MoodInterpreter.MAX_INPUT_LENGTH)
-                val interpretation = MoodInterpreter().interpret(feeling)
+                feeling = incomingFeeling
                 moodName = (interpretation as? MoodInterpretation.Matched)?.mood?.name.orEmpty()
                 unknownFeeling = interpretation == MoodInterpretation.Unknown
                 variation = 0
@@ -114,18 +156,46 @@ fun NaekimyeonApp(
                 showInfo = false
                 showDraw = false
                 drawnPlaceId = ""
-                selectedId = ""
+                selectedId = incomingDriverCandidate?.place?.id.orEmpty()
                 feedback = ""
-                screen = if (unknownFeeling) "home" else "results"
+                screen = if (unknownFeeling) "home" else if (incomingDriverCandidate != null) "detail" else "results"
                 lastIncomingId = incoming.id
-                if (unknownFeeling) onIncomingFeelingUnmatched(incoming.id) else onIncomingRequestApplied(incoming.id)
+                when {
+                    unknownFeeling -> onIncomingFeelingUnmatched(incoming.id)
+                    restricted && drivingAvailable -> {
+                        pendingDriverPlaceId = incomingDriverCandidate?.place?.id
+                        pendingDriverIncomingId = incoming.id
+                    }
+                    else -> onIncomingRequestApplied(incoming.id)
+                }
             }
+        }
+        LaunchedEffect(restricted, drivingAvailable, driverScene?.place?.id, incomingRequest?.id, pendingDriverIdForFrame) {
+            if (restricted && drivingAvailable && driverScene != null && !unappliedIncomingForFrame && pendingDriverIncomingId == null) {
+                selectedId = driverScene.place.id
+                // Returning to P keeps the same destination and opens its existing detail view.
+                screen = "detail"
+            }
+        }
+        LaunchedEffect(pendingDriverIdForFrame, restricted, drivingAvailable, driverScene?.place?.id, pendingDriverPlaceForFrame) {
+            // These immutable values belong to this composition, never a newer request plus an old candidate.
+            val id = pendingDriverIdForFrame ?: return@LaunchedEffect
+            if (restricted && !drivingAvailable) return@LaunchedEffect
+            if (restricted && driverScene?.place?.id != pendingDriverPlaceForFrame) return@LaunchedEffect
+            if (restricted && driverScene != null) {
+                selectedId = driverScene.place.id
+                screen = "detail"
+            }
+            withFrameNanos { }
+            pendingDriverIncomingId = null
+            if (restricted) onDrivingCandidateApplied(id, driverScene?.place) else onIncomingRequestApplied(id)
         }
         fun reset() {
             screen = "home"; needName = ""; timeCode = "unspecified"; sameOrigin = false
             selectedId = ""; feedback = ""; navigationRequested = false
             feeling = ""; moodName = ""; unknownFeeling = false; variation = 0; conditionsExpanded = false
             showDraw = false; drawnPlaceId = ""
+            pendingDriverIncomingId = null
         }
         fun drawScene() {
             ScenePicker.pick(eligibleScenes, drawnPlaceId, kotlin.random.Random.nextInt())?.let {
@@ -153,7 +223,28 @@ fun NaekimyeonApp(
             BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 val compact = maxWidth < 720.dp
                 val wide = maxWidth >= 960.dp && maxHeight >= 460.dp
-                if (restricted) RestrictedPanel(restrictionMessage) else Column(Modifier.fillMaxSize()) {
+                if (restricted && drivingAvailable && drivingMaxCandidates > 0) {
+                    DriverPanel(
+                        scene = driverScene, canShowAnother = driverScenes.size > 1 && !nextCoolingDown,
+                        maxStringLength = drivingMaxStringLength,
+                        status = if (navigationRequested && navigationPlaceId != null && navigationPlaceId == driverScene?.place?.id) navigationStatus
+                            else if (unknownFeeling) "마음은 정차 후 다시 골라 주세요." else "",
+                        onNext = {
+                            val current = driverScenes.indexOfFirst { it.place.id == driverScene?.place?.id }
+                            if (driverScenes.size > 1 && !nextCoolingDown) {
+                                nextCoolingDown = true
+                                selectedId = driverScenes[(current + 1).mod(driverScenes.size)].place.id
+                                screen = "detail"; navigationRequested = false; unknownFeeling = false
+                            }
+                        },
+                        onNavigate = {
+                            driverScene?.let {
+                                selectedId = it.place.id; screen = "detail"; navigationRequested = true
+                                onNavigate(it.place)
+                            }
+                        },
+                    )
+                } else if (restricted) RestrictedPanel(restrictionMessage) else Column(Modifier.fillMaxSize()) {
                     AppHeader(
                         screen = screen, compact = compact,
                         onBack = { back() }, onReset = { reset() }, onInfo = { showInfo = true },
@@ -755,6 +846,75 @@ private fun FeedbackScreen(place: Place, feedback: String, onFeedback: (String) 
             Text("선택 사항이에요 · 외부로 전송하지 않아요", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(32.dp))
             PrimaryAction(if (feedback.isBlank()) "건너뛰고 처음으로" else "처음으로 돌아가기", onDone, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun DriverPanel(
+    scene: SceneSuggestion?, canShowAnother: Boolean, maxStringLength: Int,
+    status: String, onNext: () -> Unit, onNavigate: () -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) {
+        val short = maxHeight < 560.dp
+        val stackedButtons = maxWidth < 600.dp && !short
+        val buttonTextSize = if (maxWidth < 460.dp) 18.sp else 22.sp
+        fun limited(text: String) = text.take(maxStringLength.coerceAtLeast(0))
+        Column(
+            Modifier.widthIn(max = 920.dp).fillMaxWidth().align(Alignment.Center),
+            verticalArrangement = Arrangement.spacedBy(if (short) 10.dp else 20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Symbol(Glyph.MARK, Ink.Primary, if (short) 24.dp else 30.dp)
+                Text(limited("지금 가볼 만한 곳"), color = Ink.Primary, fontSize = if (short) 23.sp else 28.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text(limited(scene?.place?.title ?: "조건에 맞는 곳이 없어요"), color = Ink.White,
+                    fontSize = if (short) 29.sp else 38.sp, lineHeight = if (short) 36.sp else 48.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(limited(scene?.activity ?: "정차 후 조건을 바꿔 보세요."), color = Ink.Muted,
+                    fontSize = if (short) 18.sp else 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (scene != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Text(limited(scene.place.outboundMinutes?.let { "가는 길 약 ${it}분" } ?: "이동 시간 미확인"),
+                        color = Ink.White, fontSize = if (short) 20.sp else 25.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(limited("주차 빈자리 미확인"), color = Ink.Muted, fontSize = if (short) 17.sp else 20.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                }
+            }
+            Text(limited("서울 지역 샘플 · 실시간 정보 아님"), color = Ink.Apricot, fontSize = 17.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val navigateLabel = limited(scene?.place?.let { "${it.title} 안내" } ?: "안내할 곳 없음")
+            if (stackedButtons) {
+                OutlinedButton(onClick = onNext, enabled = canShowAnother,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp), shape = RoundedCornerShape(17.dp),
+                    border = BorderStroke(1.dp, Ink.Line)) {
+                    Text(limited("다른 곳 보기"), fontSize = buttonTextSize)
+                }
+                Button(onClick = onNavigate, enabled = scene != null,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp), shape = RoundedCornerShape(17.dp)) {
+                    Text(navigateLabel, fontSize = buttonTextSize, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    OutlinedButton(onClick = onNext, enabled = canShowAnother,
+                        modifier = Modifier.weight(.4f).heightIn(min = 64.dp), shape = RoundedCornerShape(17.dp),
+                        border = BorderStroke(1.dp, Ink.Line)) {
+                        Text(limited("다른 곳 보기"), fontSize = buttonTextSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Button(onClick = onNavigate, enabled = scene != null,
+                        modifier = Modifier.weight(.6f).heightIn(min = 64.dp), shape = RoundedCornerShape(17.dp)) {
+                        Text(navigateLabel, fontSize = buttonTextSize, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            if (status.isNotBlank()) {
+                Text(limited(status), color = Ink.Muted, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

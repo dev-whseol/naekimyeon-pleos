@@ -99,6 +99,32 @@ object GleoBridge {
         )
     }
 
+    /**
+     * Call only after a known-safe driving panel has presented this single sample candidate.
+     * This acknowledges selection/display only; a separate explicit user action owns navigation.
+     */
+    fun respondDrivingCandidate(context: Context, request: GleoBreakRequest, candidateTitle: String): Boolean {
+        val title = candidateTitle.trim().take(80)
+        if (title.isBlank()) {
+            return respond(context, GleoResponseStatus.FAIL, "A sample destination could not be selected.")
+        }
+        val data = JSONArray().put(JSONObject().apply {
+            put("candidateTitle", title)
+            put("candidateCount", 1)
+            put("dataSource", "sample")
+            put("hasFeeling", request.feeling != null)
+            put("liveRecommendationConnected", false)
+            put("navigationStarted", false)
+            put("confirmationRequired", true)
+        })
+        return respond(
+            context,
+            GleoResponseStatus.SUCCESS,
+            "One sample outing option is ready. Navigation will start only after explicit confirmation.",
+            data
+        )
+    }
+
     /** A true return means broadcast submission only; the Gleo app does not acknowledge delivery. */
     fun respond(
         context: Context,

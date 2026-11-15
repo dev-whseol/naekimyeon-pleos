@@ -41,7 +41,7 @@ APK 파일명에 사용한 출품자 이름은 제출 파일 식별을 위한 �
 
 release 병합 manifest에서도 위치·마이크·INTERNET 권한과 debug 선언이 없음을 확인했습니다. AndroidX가 추가한 초기화 provider는 `exported=false`입니다. ProfileInstallReceiver는 `exported=true`이지만 `android.permission.DUMP`로 보호되며, 일반적인 무권한 외부 호출 지점과 구분합니다. 내부 동적 receiver 권한은 signature 보호 수준입니다. 최종 APK가 갱신되면 같은 검사를 반복합니다.
 
-`allowBackup=false` 외에도 `backup_rules.xml`과 `data_extraction_rules.xml`에서 앱 데이터의 cloud backup·device transfer 영역을 명시적으로 제외합니다. 자동 테스트 67개 중 Gleo 입력·응답의 실제 Android 시험은 27개이며, 원문 비노출 계약도 검사합니다. 자동 시험 수는 전체 보안 취약점이 없다는 인증이 아닙니다.
+`allowBackup=false` 외에도 `backup_rules.xml`과 `data_extraction_rules.xml`에서 앱 데이터의 cloud backup·device transfer 영역을 명시적으로 제외합니다. 이전 0.1 테스트 67개에는 Gleo 입력·응답의 실제 Android 시험 27개와 원문 비노출 계약 검사가 포함되었습니다. 0.2 주행용 응답 검증은 테스트 기록에 별도로 남깁니다. 자동 시험 수는 전체 보안 취약점이 없다는 인증이 아닙니다.
 
 Pleos 보안 가이드는 공유 차량의 계정 전환, 필요한 정보만 수집, 토큰 보호, 개인정보 로그 제한을 요구합니다. 이 데모에 계정이 없다는 사실은 추후 계정·위치·분석 기능의 보안 요구까지 해결했다는 뜻이 아닙니다. [공식 보안·개인정보 설계](https://document.pleos.ai/docs/pleos-only/vehicle-app-planning-guide/security-privacy)
 
