@@ -1,0 +1,38 @@
+{
+  "packageName": "com.naekimyeon.pleos",
+  "appDescription": "An app that helps users explore short-break experiences based on their explicitly expressed feelings, available time, and preferred activity. The current version presents sample candidates and requires separate user confirmation for navigation.",
+  "version": "0.1.0-demo",
+  "actionCalls": [
+    {
+      "type": "function",
+      "function": {
+        "name": "FIND_BREAK_PLACE",
+        "description": "Opens sample short-break experiences matching a supplied feeling or activity preference and optional time budget without starting navigation. At least one of feeling or need must be supplied.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "need": {
+              "type": "string",
+              "enum": ["breeze", "conversation", "shelter"],
+              "description": "The user's explicit preferred break activity: outdoor fresh air, conversation, or shelter, omitted when only a feeling is supplied."
+            },
+            "feeling": {
+              "type": "string",
+              "description": "The user's explicitly supplied feeling or desired experience in a nonblank phrase of at most 120 characters, omitted when no phrase was supplied."
+            },
+            "timeMinutes": {
+              "type": "number",
+              "description": "The available time in whole minutes from 1 to 240, omitted when the user has no time limit."
+            },
+            "noTimeLimit": {
+              "type": "boolean",
+              "description": "Whether the user explicitly has no time limit, mutually exclusive with a time budget."
+            }
+          },
+          "required": []
+        },
+        "component": "activity"
+      }
+    }
+  ]
+}
