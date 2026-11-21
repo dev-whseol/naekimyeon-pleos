@@ -24,7 +24,52 @@ data class IncomingRequest(
 data class DataProvenance(
     val label: String, val isSample: Boolean,
     val sourceUrl: String? = null, val checkedOn: String? = null,
+    val coordinateSourceUrl: String? = null,
 )
+
+/** Named on-site area verified in the operator's guide, never a vehicle navigation coordinate. */
+data class VisitPoint(
+    val id: String,
+    val name: String,
+    val sourceUrl: String,
+    val checkedOn: String,
+    val accessNote: String = "현장 안내와 출입 가능 여부를 확인해 주세요.",
+) {
+    init { require(id.isNotBlank() && name.isNotBlank() && sourceUrl.startsWith("https://") && checkedOn.isNotBlank()) }
+}
+
+/** Editorial activities using verified areas; none of these strings establishes travel feasibility. */
+data class PlaceActivity(
+    val title: String,
+    val primaryPointId: String,
+    val activity: String,
+    val rationale: String,
+    val extraPointId: String? = null,
+    val extraActivity: String? = null,
+    val briefActivity: String = activity,
+) {
+    init {
+        require(title.isNotBlank() && activity.isNotBlank() && rationale.isNotBlank() && briefActivity.isNotBlank())
+        require((extraPointId == null) == (extraActivity == null))
+        require(extraPointId == null || extraPointId != primaryPointId)
+        require(extraActivity == null || extraActivity.isNotBlank())
+    }
+}
+
+data class PlaceExperience(
+    val points: List<VisitPoint>,
+    val byMood: Map<MoodIntent, PlaceActivity>,
+    val undecided: PlaceActivity,
+) {
+    init {
+        require(points.size >= 2 && points.map { it.id }.distinct().size == points.size)
+        require(byMood.keys.containsAll(MoodIntent.entries))
+        val ids = points.map { it.id }.toSet()
+        (byMood.values + undecided).forEach {
+            require(it.primaryPointId in ids && (it.extraPointId == null || it.extraPointId in ids))
+        }
+    }
+}
 
 data class ParkingInfo(
     val facility: FacilityState,
@@ -55,6 +100,7 @@ data class Place(
     val visitNote: String = "",
     /** Editorial preference, not measured popularity or a claim about visitors' feelings. */
     val moodPreference: Map<MoodIntent, Int> = emptyMap(),
+    val experience: PlaceExperience? = null,
 ) {
     init {
         require(latitude in -90.0..90.0 && longitude in -180.0..180.0)

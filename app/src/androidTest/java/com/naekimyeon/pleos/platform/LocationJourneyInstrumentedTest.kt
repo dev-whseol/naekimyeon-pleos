@@ -92,23 +92,24 @@ class LocationJourneyInstrumentedTest {
             injectFreshSeoulLocation()
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("어디 가지?")), 15_000))
-                tap("현재 위치 사용")
-                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("현재 위치 기준으로 찾았어요")), 25_000))
-                assertTrue(device.hasObject(By.pkg(pkg).textContains("테스트 위치")) ||
-                    device.hasObject(By.pkg(pkg).textContains("시험 위치")) || device.hasObject(By.pkg(pkg).textContains("에뮬레이터 위치")))
+                capture("outing-home.png", "outingHomeScreenshotUri")
+                tap("한 곳 골라줘")
+                val dismissPick = checkNotNull(device.wait(Until.findObject(By.pkg(pkg).desc("추천 창 닫기")), 25_000))
+                capture("outing-pick.png", "outingPickScreenshotUri")
+                dismissPick.click()
+                tap("위치 설정")
                 tap("앱을 열 때 내 위치 사용")
                 instrumentation.waitForIdleSync()
                 assertTrue(preferences.isEnabled())
                 // Recreate the actual Activity: no location values were saved, but the explicit bool can resume.
                 scenario.recreate()
-                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("현재 위치 기준으로 찾았어요")), 25_000))
-                tap("추천 장소 보기")
-                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("서울숲")), 5_000))
+                tap("직접 고르기")
+                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("서울숲")), 25_000))
                 assertFalse(device.hasObject(By.pkg(pkg).text("강변 산책길")))
                 capture("nearby-results.png", "nearbyResultsScreenshotUri")
                 tap("서울숲")
-                tap("내비로 연결")
-                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("대표 위치 보내기")), 5_000))
+                tap("목적지 확인")
+                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("이곳으로 안내")), 5_000))
                 capture("representative-confirmation.png", "representativeConfirmationScreenshotUri")
                 tap("둘러보기 계속")
                 if (manualDriving) {
@@ -119,9 +120,9 @@ class LocationJourneyInstrumentedTest {
                 tap("샘플 둘러보기")
                 instrumentation.waitForIdleSync()
                 assertFalse(preferences.isEnabled())
-                tap("내 위치로 공원 보기")
-                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("지금 위치에서 찾아볼까요?")), 5_000))
-                assertFalse(device.hasObject(By.pkg(pkg).text("현재 위치 기준으로 찾았어요")))
+                tap("내 위치로 찾기")
+                assertNotNull(device.wait(Until.findObject(By.pkg(pkg).text("한 곳 골라줘")), 5_000))
+                assertFalse(device.hasObject(By.pkg(pkg).textContains("에뮬레이터 위치")))
             }
         } finally {
             if (providerAdded) runCatching { manager.removeTestProvider(LocationManager.GPS_PROVIDER) }
@@ -238,7 +239,7 @@ class LocationJourneyInstrumentedTest {
                 putString("awaitingVehicleGear", "P")
                 putString("drivingTestStage", "Restore P with the real Virtual Console before sample-mode cleanup")
             })
-            val parked = device.wait(Until.hasObject(By.pkg(packageName).text("내비로 연결")), 60_000L)
+            val parked = device.wait(Until.hasObject(By.pkg(packageName).text("목적지 확인")), 60_000L)
             if (parked) {
                 capture("nearby-parked-after-driving.png", "parkedAfterDrivingScreenshotUri")
             } else {

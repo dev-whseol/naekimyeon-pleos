@@ -1,13 +1,13 @@
 {
   "packageName": "com.naekimyeon.pleos",
-  "appDescription": "A vehicle outing companion that suggests sample places and activities from explicit preferences. While driving it presents one concise candidate and requires an explicit guidance confirmation; detailed comparison is available when unrestricted.",
-  "version": "0.2.0-demo",
+  "appDescription": "Find a place to go and something to do there based on the driver's preferences. The app searches its nearby catalog or the selected sample area and shows one option at a time while driving.",
+  "version": "0.4.0-preview",
   "actionCalls": [
     {
       "type": "function",
       "function": {
         "name": "FIND_BREAK_PLACE",
-        "description": "Opens sample short-break experiences matching a supplied feeling or activity preference and optional time budget without starting navigation. At least one of feeling or need must be supplied.",
+        "description": "Show outing ideas for the supplied feeling or activity preference. Accept an optional time budget or an explicit no-time-limit preference. The driver confirms navigation separately. Supply at least one of feeling or need.",
         "parameters": {
           "type": "object",
           "properties": {

@@ -5,7 +5,8 @@ class RecommendationEngine {
     fun recommend(places: List<Place>, request: RecommendationRequest): RecommendationResult {
         if (places.isEmpty()) return RecommendationResult.Empty(EmptyReason.NO_PLACES)
         val matching = places.distinctBy { it.id }.filter { place ->
-            request.needs.isEmpty() || request.needs.all { it in place.needs }
+            (Need.SHELTER !in request.needs || place.indoor) &&
+                (request.needs.isEmpty() || request.needs.all { it in place.needs })
         }.sortedWith(compareBy<Place> { it.outboundMinutes ?: Int.MAX_VALUE }
             .thenBy { it.straightLineDistanceMeters ?: Double.MAX_VALUE }.thenBy { it.id })
         if (matching.isEmpty()) return RecommendationResult.Empty(EmptyReason.NO_MATCHING_NEED)

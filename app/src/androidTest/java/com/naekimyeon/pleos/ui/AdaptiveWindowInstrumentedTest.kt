@@ -11,6 +11,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -46,11 +47,11 @@ class AdaptiveWindowInstrumentedTest {
             scenario.onActivity { originalOrientation = it.requestedOrientation }
             requireVisible("어디 가지?", 5_000)
             tap("샘플 둘러보기")
-            tap("이동 조건 더하기")
+            tap("조건 더하기")
             tap("바람 쐬기")
             tap("45분")
             tap("출발한 곳으로 돌아오기")
-            tap("추천 장소 보기")
+            tap("직접 고르기")
             requireVisible("지금 가볼 만한 곳", 2_000)
             assertTrue("The explicit need and round-trip budget must reach the results screen", device.hasObject(
                 By.pkg(packageName).text("바람 쐬기  ·  45분 안에 돌아오기")
@@ -120,8 +121,17 @@ class AdaptiveWindowInstrumentedTest {
     }
 
     private fun tap(text: String) {
-        requireVisible(text, 2_000).click()
-        device.waitForIdle(500)
+        var target = device.wait(Until.findObject(By.pkg(packageName).text(text)), 700)
+        for (direction in listOf(Direction.DOWN, Direction.UP)) {
+            repeat(5) {
+                if (target == null) {
+                    device.findObject(By.pkg(packageName).scrollable(true))?.scroll(direction, .7f)
+                    target = device.wait(Until.findObject(By.pkg(packageName).text(text)), 350)
+                }
+            }
+        }
+        checkNotNull(target) { "Expected app control: $text" }.click()
+        device.waitForIdle(400)
     }
 
     private fun requireVisible(text: String, timeout: Long): UiObject2 = checkNotNull(
@@ -130,7 +140,7 @@ class AdaptiveWindowInstrumentedTest {
 
     private fun assertChoicesRetained(stage: String) {
         // Behavioral evidence avoids depending on how Compose exports selected semantics to accessibility.
-        tap("추천 장소 보기")
+        tap("직접 고르기")
         assertTrue("Need, budget or explicit return choice was lost $stage", device.wait(
             Until.hasObject(By.pkg(packageName).text("바람 쐬기  ·  45분 안에 돌아오기")), 2_000
         ))

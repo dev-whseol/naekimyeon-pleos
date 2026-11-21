@@ -185,7 +185,9 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         activityResumed = false
         mainHandler.removeCallbacks(locationRefresh)
-        locationAdapter?.cancel()
+        // The system permission window pauses this Activity. awaitingPermission() already
+        // stopped all location acquisition; keep the user's pending choice until the result.
+        if (!locationPermissionInFlight) locationAdapter?.cancel()
         locationRationale?.dismiss()
         if (!locationPermissionInFlight) {
             locationPermissionAuthorized = false
@@ -197,7 +199,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         mainHandler.removeCallbacks(locationRefresh)
-        locationAdapter?.cancel()
+        if (!locationPermissionInFlight) locationAdapter?.cancel()
         super.onStop()
     }
 

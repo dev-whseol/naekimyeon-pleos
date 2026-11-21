@@ -57,7 +57,7 @@ class NearbyPlacesTest {
 
     @Test fun resultDeduplicatesAndDoesNotMutateCatalogWithCurrentLocation() {
         val places = NearbyPlaces.find(CuratedPlaces.places + CuratedPlaces.places, seoul)
-        assertEquals(3, places.size)
+        assertEquals(CuratedPlaces.places.size, places.size)
         assertEquals(places.map { it.straightLineDistanceMeters }.sortedBy { it }, places.map { it.straightLineDistanceMeters })
         assertTrue(CuratedPlaces.places.all { it.straightLineDistanceMeters == null })
     }
@@ -82,13 +82,14 @@ class NearbyPlacesTest {
 
     @Test fun indoorRequestCannotInventAnIndoorPartOfAnOutdoorPark() {
         assertEquals(RecommendationResult.Empty(EmptyReason.NO_MATCHING_NEED),
-            RecommendationEngine().recommend(NearbyPlaces.find(seoul), RecommendationRequest(needs = setOf(Need.SHELTER))))
+            RecommendationEngine().recommend(NearbyPlaces.find(seoul).filterNot { it.indoor },
+                RecommendationRequest(needs = setOf(Need.SHELTER))))
     }
 
     @Test fun realCatalogHasAttributionAndNoSampleDurationsOrVacancyClaims() {
         assertTrue(CuratedPlaces.places.all { !it.provenance.isSample &&
-            it.provenance.sourceUrl?.startsWith("https://data.seoul.go.kr/") == true &&
-            it.provenance.checkedOn == "2026-11-16" && it.address.isNotBlank() &&
+            it.provenance.sourceUrl?.startsWith("https://") == true &&
+            it.provenance.checkedOn in setOf("2026-11-16", "2026-11-21") && it.address.isNotBlank() &&
             it.outboundMinutes == null && it.returnMinutes == null && it.accessMinutes == null &&
             it.parking.availability == AvailabilityState.UNKNOWN && it.visitNote.contains("대표 위치") })
     }

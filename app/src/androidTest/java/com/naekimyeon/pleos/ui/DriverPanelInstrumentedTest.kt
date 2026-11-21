@@ -80,7 +80,7 @@ class DriverPanelInstrumentedTest {
             assertFalse(device.hasObject(By.pkg(packageName).text("나무 그늘 쉼터 안내")))
 
             scenario.onActivity { available.value = true; restricted.value = false }
-            assertNotNull(device.wait(Until.findObject(By.pkg(packageName).text("내비로 연결")), 3_000))
+            assertNotNull(device.wait(Until.findObject(By.pkg(packageName).text("목적지 확인")), 3_000))
             assertTrue(device.hasObject(By.pkg(packageName).text("나무 그늘 쉼터")))
             assertEquals(1, navigationCount.get())
         }

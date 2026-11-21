@@ -1,5 +1,7 @@
 # 시연 자료와 이미지 출처
 
+0.4 홈 화면의 서울숲 호수 사진은 Enigma7seven이 2009년에 촬영한 **Seoulforest lake01.jpg**입니다. 원본을 WebP로 변환했고 앱 창에 맞춰 잘라 표시합니다. 해당 사진 및 변환본의 이용 조건은 CC BY-SA 3.0입니다. [사진과 작가](https://commons.wikimedia.org/wiki/File:Seoulforest_lake01.jpg) · [라이선스](https://creativecommons.org/licenses/by-sa/3.0/)
+
 앱의 강변·카페 이미지는 이 프로젝트 기획 과정에서 생성한 AI 예시 이미지입니다. 실제 추천 장소 사진, 현장 촬영, 장소의 현재 상태를 나타내지 않습니다. 화면에 같은 안내를 표시합니다. 카메라 권한이나 차량 카메라는 사용하지 않습니다.
 
 - `app/src/main/res/drawable-nodpi/riverside_concept.webp`: 강변 휴식의 분위기를 표현한 예시

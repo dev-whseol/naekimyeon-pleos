@@ -10,7 +10,8 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.naekimyeon.pleos.platform.LocationPrecision
 import com.naekimyeon.pleos.platform.LocationState
 import com.naekimyeon.pleos.platform.LocationStatus
+import com.naekimyeon.pleos.domain.CuratedPlaces
 import kotlin.math.ceil
 
 @Composable
@@ -28,9 +30,14 @@ internal fun DiscoverySourcePanel(
     sampleMode: Boolean, state: LocationState, nearbyCount: Int,
     onChooseSource: (Boolean) -> Unit, onRequestLocation: () -> Unit,
     useLocationOnLaunch: Boolean = false, onUseLocationOnLaunchChanged: (Boolean) -> Unit = {},
+    compact: Boolean = false,
 ) {
+    var detailsExpanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.status) {
+        if (state.status !in listOf(LocationStatus.IDLE, LocationStatus.READY, LocationStatus.LOCATING, LocationStatus.REQUESTING_PERMISSION)) detailsExpanded = true
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        listOf(false to "내 위치로 공원 보기", true to "샘플 둘러보기").forEach { (sample, label) ->
+        listOf(false to "내 위치로 찾기", true to "샘플 둘러보기").forEach { (sample, label) ->
             Surface(onClick = { onChooseSource(sample) }, color = if (sampleMode == sample) Ink.Primary else Ink.Panel,
                 contentColor = if (sampleMode == sample) Ink.Deep else Ink.Muted,
                 shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, if (sampleMode == sample) Ink.Primary else Ink.Line),
@@ -43,13 +50,29 @@ internal fun DiscoverySourcePanel(
             }
         }
     }
-    if (sampleMode) return
+    if (sampleMode) {
+        if (compact) {
+            Spacer(Modifier.height(7.dp))
+            Text("현재 위치와 무관한 샘플 장소예요.", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        return
+    }
     Spacer(Modifier.height(14.dp))
     val busy = state.status == LocationStatus.LOCATING || state.status == LocationStatus.REQUESTING_PERMISSION
     val outside = state.isUsable && nearbyCount == 0
+    if (compact) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 54.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("서울·과천 등록 장소 ${CuratedPlaces.places.size}곳 · 직선 50km", Modifier.weight(1f), color = Ink.Muted,
+                style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { detailsExpanded = !detailsExpanded }, modifier = Modifier.heightIn(min = 54.dp)) {
+                Text(if (detailsExpanded) "위치 설정 접기" else "위치 설정")
+            }
+        }
+        if (!detailsExpanded) return
+    }
     Surface(color = Ink.Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("서울·과천 등록 공원 3곳 · 직선 50km 범위", color = Ink.Primary, style = MaterialTheme.typography.labelMedium)
+            Text("서울·과천 등록 장소 ${CuratedPlaces.places.size}곳 · 직선 50km 범위", color = Ink.Primary, style = MaterialTheme.typography.labelMedium)
             Text(when {
                 outside -> "이 근처는 아직 준비 중이에요"
                 state.isUsable -> "현재 위치 기준으로 찾았어요"
@@ -58,7 +81,7 @@ internal fun DiscoverySourcePanel(
                 else -> "위치를 다시 확인해 주세요"
             }, color = Ink.White, style = MaterialTheme.typography.titleMedium)
             Text(when {
-                outside -> "현재 위치에서 직선 50km 안에 등록된 서울·과천 공원이 없어요."
+                outside -> "등록된 장소 중 현재 위치에서 직선 50km 안에 있는 곳이 없어요."
                 state.isUsable -> buildString {
                     append(if (state.precision == LocationPrecision.APPROXIMATE) "대략적인 위치 기준" else "기기 위치 기준")
                     append(" · 직선 거리만 안내해요")
